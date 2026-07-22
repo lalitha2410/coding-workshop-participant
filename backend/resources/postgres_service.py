@@ -33,7 +33,7 @@ def _build_config():
         f"host={os.getenv('POSTGRES_HOST', 'localhost')} "
         f"port={os.getenv('POSTGRES_PORT', '5432')} "
         f"user={os.getenv('POSTGRES_USER', 'postgres')} "
-        f"password={os.getenv('POSTGRES_PASS', 'postgres')} "
+        f"password={os.getenv('POSTGRES_PASS', 'postgres123')} "
         f"dbname={os.getenv('POSTGRES_NAME', 'projectdb')} "
         f"connect_timeout=15"
     )

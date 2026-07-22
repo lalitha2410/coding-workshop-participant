@@ -1,35 +1,46 @@
-import { useState } from 'react'
-import reactLogo from '/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+/**
+ * Route tree: public auth routes, and a protected shell hosting the app pages.
+ * All app pages require a valid token; the Users page additionally requires the
+ * manage_users permission (Admin) and 403s to /not-permitted otherwise.
+ */
 
-function App() {
-  const [count, setCount] = useState(0)
+import { Routes, Route } from 'react-router-dom';
+import { ProtectedRoute, PublicOnlyRoute } from './auth/ProtectedRoute';
+import AppShell from './components/layout/AppShell';
+import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
+import DashboardPage from './pages/DashboardPage';
+import ProjectsPage from './pages/projects/ProjectsPage';
+import DeliverablesPage from './pages/deliverables/DeliverablesPage';
+import ResourcesPage from './pages/resources/ResourcesPage';
+import AllocationsPage from './pages/allocations/AllocationsPage';
+import PlaceholderPage from './pages/PlaceholderPage';
+import { NotPermittedPage, NotFoundPage } from './pages/StatusPages';
 
+export default function App() {
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
-}
+    <Routes>
+      <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
+      <Route path="/register" element={<PublicOnlyRoute><RegisterPage /></PublicOnlyRoute>} />
 
-export default App
+      <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
+        <Route index element={<DashboardPage />} />
+        <Route path="projects" element={<ProjectsPage />} />
+        <Route path="deliverables" element={<DeliverablesPage />} />
+        <Route path="resources" element={<ResourcesPage />} />
+        <Route path="allocations" element={<AllocationsPage />} />
+        <Route
+          path="users"
+          element={
+            <ProtectedRoute permission="manage_users">
+              <PlaceholderPage title="Users" subtitle="Manage accounts and roles (Admin only)." />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="not-permitted" element={<NotPermittedPage />} />
+      </Route>
+
+      <Route path="*" element={<NotFoundPage />} />
+    </Routes>
+  );
+}
