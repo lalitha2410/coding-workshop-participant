@@ -100,6 +100,15 @@ fi
 echo "INFO: Syncing shared backend modules..."
 "$SCRIPT_DIR/sync-shared.sh"
 
+# For local development, LocalStack hot-reload runs each Lambda from its source
+# folder rather than the built zip, so third-party dependencies must be vendored
+# into the folder or `import` fails at runtime. Cloud builds install deps into
+# the zip via Terraform's pip_requirements and skip this step.
+if [ "$ENVIRONMENT" != "aws" ]; then
+    echo "INFO: Vendoring Python dependencies into service folders for local hot-reload..."
+    "$SCRIPT_DIR/vendor-deps.sh"
+fi
+
 # Apply Terraform configuration automatically
 terraform apply -auto-approve
 echo "INFO: Infrastructure deployment complete!"

@@ -256,3 +256,14 @@ tfplan
 
 # Snyk Security Extension - AI Rules (auto-generated)
 .github/instructions/snyk_rules.instructions.md
+
+# Vendored Python deps for LocalStack hot-reload (installed by bin/vendor-deps.sh
+# / start-dev.sh into each backend service folder). Build artifacts — not source.
+backend/*/.pip_installed
+backend/*/__pycache__/
+backend/*/*.dist-info/
+backend/*/*.libs/
+backend/*/bcrypt/
+backend/*/jwt/
+backend/*/psycopg/
+backend/*/psycopg_binary/
