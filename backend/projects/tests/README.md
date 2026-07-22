@@ -4,7 +4,7 @@ Two layers, following the workshop testing guidance:
 
 - **`test_validation.py`** — unit tests for payload validation (pure, no DB).
 - **`test_handler.py`** — unit tests for the `function.handler` router with the
-  repository monkeypatched; covers routing, status codes (200/201/204/400/404/500),
+  repository monkeypatched; covers routing, status codes (200/201/204/400/404/405/500),
   request parsing (API Gateway v1 + v2 shapes), and JSON serialization.
 - **`test_integration.py`** — round-trips create → read → list/filter → update →
   delete against a **real local PostgreSQL**. Auto-skips when the DB or `projects`

@@ -95,6 +95,11 @@ else
     terraform init -reconfigure
 fi
 
+# Propagate shared backend modules into each service folder before packaging,
+# so every Lambda bundles an up-to-date copy (see backend/_shared/README.md).
+echo "INFO: Syncing shared backend modules..."
+"$SCRIPT_DIR/sync-shared.sh"
+
 # Apply Terraform configuration automatically
 terraform apply -auto-approve
 echo "INFO: Infrastructure deployment complete!"

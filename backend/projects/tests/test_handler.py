@@ -196,9 +196,9 @@ def test_delete_without_id_returns_400(repo):
 # Cross-cutting
 # ---------------------------------------------------------------------------
 
-def test_unsupported_method_returns_400(repo):
+def test_unsupported_method_returns_405(repo):
     resp = function.handler({"httpMethod": "PATCH", "path": "/projects/1"})
-    assert resp["statusCode"] == 400
+    assert resp["statusCode"] == 405
 
 
 def test_repository_error_returns_500(repo):

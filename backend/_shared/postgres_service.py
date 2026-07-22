@@ -1,8 +1,3 @@
-# ============================================================
-# GENERATED FILE - DO NOT EDIT
-# Source of truth: backend/_shared/postgres_service.py
-# Regenerate with: bin/sync-shared.sh
-# ============================================================
 """
 Shared PostgreSQL connection management for backend services.
 

@@ -1,7 +1,7 @@
 """
-Lambda handler for the projects CRUD service.
+Lambda handler for the deliverables CRUD service.
 
-Routes API-Gateway-style HTTP requests to the projects repository and returns
+Routes API-Gateway-style HTTP requests to the deliverables repository and returns
 Lambda-proxy responses ({statusCode, headers, body}) with the status codes the
 workshop guide expects: 200 (read/update), 201 (create), 204 (delete),
 400 (validation/bad request), 404 (not found), 405 (method not allowed),
@@ -13,12 +13,13 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal
 
-from projects_repository import (
-    list_projects,
-    get_project,
-    create_project,
-    update_project,
-    delete_project,
+from deliverables_repository import (
+    list_deliverables,
+    get_deliverable,
+    create_deliverable,
+    update_deliverable,
+    delete_deliverable,
+    project_exists,
 )
 from validation import validate_create, validate_update
 
@@ -80,7 +81,7 @@ def _get_path_id(event):
         return path_params["id"]
     path = event.get("path") or event.get("rawPath") or ""
     segments = [s for s in path.split("/") if s]
-    if segments and segments[-1] != "projects":
+    if segments and segments[-1] != "deliverables":
         return segments[-1]
     return None
 
@@ -113,21 +114,21 @@ def _get_body(event):
 
 def _handle_list(event):
     query = _get_query(event)
-    projects = list_projects(
+    deliverables = list_deliverables(
+        project_id=query.get("project_id"),
         status=query.get("status"),
-        department=query.get("department"),
     )
-    return _response(200, projects)
+    return _response(200, deliverables)
 
 
-def _handle_get(project_id):
-    pid = _parse_id(project_id)
-    if pid is None:
-        return _error(404, f"Project '{project_id}' not found.")
-    project = get_project(pid)
-    if project is None:
-        return _error(404, f"Project {pid} not found.")
-    return _response(200, project)
+def _handle_get(deliverable_id):
+    did = _parse_id(deliverable_id)
+    if did is None:
+        return _error(404, f"Deliverable '{deliverable_id}' not found.")
+    deliverable = get_deliverable(did)
+    if deliverable is None:
+        return _error(404, f"Deliverable {did} not found.")
+    return _response(200, deliverable)
 
 
 def _handle_create(event):
@@ -135,31 +136,37 @@ def _handle_create(event):
     errors = validate_create(data)
     if errors:
         return _error(400, "Validation failed.", errors)
-    project = create_project(data)
-    return _response(201, project)
+    # Cross-entity reference check: the parent project must exist.
+    if not project_exists(data.get("project_id")):
+        return _error(400, f"Referenced project {data.get('project_id')} does not exist.")
+    deliverable = create_deliverable(data)
+    return _response(201, deliverable)
 
 
-def _handle_update(project_id, event):
-    pid = _parse_id(project_id)
-    if pid is None:
-        return _error(404, f"Project '{project_id}' not found.")
+def _handle_update(deliverable_id, event):
+    did = _parse_id(deliverable_id)
+    if did is None:
+        return _error(404, f"Deliverable '{deliverable_id}' not found.")
     data = _get_body(event)
     errors = validate_update(data)
     if errors:
         return _error(400, "Validation failed.", errors)
-    project = update_project(pid, data)
-    if project is None:
-        return _error(404, f"Project {pid} not found.")
-    return _response(200, project)
+    # If the project_id is being changed, the new parent project must exist.
+    if data.get("project_id") is not None and not project_exists(data.get("project_id")):
+        return _error(400, f"Referenced project {data.get('project_id')} does not exist.")
+    deliverable = update_deliverable(did, data)
+    if deliverable is None:
+        return _error(404, f"Deliverable {did} not found.")
+    return _response(200, deliverable)
 
 
-def _handle_delete(project_id):
-    pid = _parse_id(project_id)
-    if pid is None:
-        return _error(404, f"Project '{project_id}' not found.")
-    deleted = delete_project(pid)
+def _handle_delete(deliverable_id):
+    did = _parse_id(deliverable_id)
+    if did is None:
+        return _error(404, f"Deliverable '{deliverable_id}' not found.")
+    deleted = delete_deliverable(did)
     if deleted is None:
-        return _error(404, f"Project {pid} not found.")
+        return _error(404, f"Deliverable {did} not found.")
     return _no_content()
 
 
@@ -174,20 +181,20 @@ def handler(event=None, context=None):
 
     try:
         method = _get_method(event)
-        project_id = _get_path_id(event)
+        deliverable_id = _get_path_id(event)
 
         if method == "GET":
-            return _handle_get(project_id) if project_id else _handle_list(event)
+            return _handle_get(deliverable_id) if deliverable_id else _handle_list(event)
         if method == "POST":
             return _handle_create(event)
         if method == "PUT":
-            if not project_id:
-                return _error(400, "A project id is required to update.")
-            return _handle_update(project_id, event)
+            if not deliverable_id:
+                return _error(400, "A deliverable id is required to update.")
+            return _handle_update(deliverable_id, event)
         if method == "DELETE":
-            if not project_id:
-                return _error(400, "A project id is required to delete.")
-            return _handle_delete(project_id)
+            if not deliverable_id:
+                return _error(400, "A deliverable id is required to delete.")
+            return _handle_delete(deliverable_id)
 
         return _error(405, f"Method {method} not allowed.")
     except json.JSONDecodeError:
@@ -199,4 +206,4 @@ def handler(event=None, context=None):
 
 # Main entry point for local testing.
 if __name__ == "__main__":
-    print(handler({"httpMethod": "GET", "path": "/projects"}))
+    print(handler({"httpMethod": "GET", "path": "/deliverables"}))
