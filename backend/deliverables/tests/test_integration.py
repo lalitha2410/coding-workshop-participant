@@ -87,15 +87,40 @@ def test_get_missing_returns_none():
 
 
 def test_list_filters_by_project_and_status(parent_project, created_deliverable):
-    by_project = list_deliverables(project_id=parent_project)
-    assert all(d["project_id"] == parent_project for d in by_project)
-    assert any(d["id"] == created_deliverable["id"] for d in by_project)
+    by_project = list_deliverables(project_id=parent_project, limit=200)
+    assert all(d["project_id"] == parent_project for d in by_project["items"])
+    assert any(d["id"] == created_deliverable["id"] for d in by_project["items"])
+    assert by_project["total"] >= 1 and by_project["limit"] == 200
 
     by_status = list_deliverables(project_id=parent_project, status="not_started")
-    assert any(d["id"] == created_deliverable["id"] for d in by_status)
+    assert any(d["id"] == created_deliverable["id"] for d in by_status["items"])
 
     none_match = list_deliverables(project_id=parent_project, status="completed")
-    assert all(d["id"] != created_deliverable["id"] for d in none_match)
+    assert none_match["total"] == 0 and none_match["items"] == []
+
+
+def test_pagination_slices_and_counts(parent_project):
+    made = [create_deliverable({"project_id": parent_project, "name": f"Pag IT {i}"}) for i in range(3)]
+    page1 = list_deliverables(project_id=parent_project, limit=2, offset=0)
+    page2 = list_deliverables(project_id=parent_project, limit=2, offset=2)
+    assert page1["total"] == 3 and page2["total"] == 3
+    assert len(page1["items"]) == 2 and len(page2["items"]) == 1
+    ids1 = {d["id"] for d in page1["items"]}
+    ids2 = {d["id"] for d in page2["items"]}
+    assert ids1.isdisjoint(ids2)
+    # No explicit cleanup needed: deleting the parent project cascades.
+
+
+def test_sql_injection_payload_stored_literally(parent_project):
+    payload = "'; DROP TABLE deliverables;--"
+    created = create_deliverable({"project_id": parent_project, "name": payload})
+    assert get_deliverable(created["id"])["name"] == payload  # literal data, not executed
+    assert list_deliverables(project_id=parent_project, limit=10)["total"] >= 1  # table intact
+
+
+def test_long_text_description_is_accepted(parent_project):
+    created = create_deliverable({"project_id": parent_project, "name": "Long Desc", "description": "y" * 10000})
+    assert len(get_deliverable(created["id"])["description"]) == 10000
 
 
 def test_partial_update_preserves_other_fields(created_deliverable):

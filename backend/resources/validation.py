@@ -15,6 +15,20 @@ import re
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
+# Max lengths for VARCHAR columns (schema.sql). Enforcing these keeps over-long
+# input a clean 400 instead of a database error (500).
+_MAX_LENGTHS = {"name": 150, "email": 255, "title": 100}
+
+
+def _validate_lengths(data):
+    errors = []
+    for field, max_len in _MAX_LENGTHS.items():
+        value = data.get(field)
+        if isinstance(value, str) and len(value) > max_len:
+            errors.append(f"`{field}` must be at most {max_len} characters.")
+    return errors
+
+
 def validate_create(data):
     """Return a list of validation errors for a create payload ([] if valid)."""
     if not isinstance(data, dict):
@@ -23,6 +37,7 @@ def validate_create(data):
     if not _is_non_empty_string(data.get("name")):
         errors.append("`name` is required and cannot be empty.")
     errors.extend(_validate_email(data, required=True))
+    errors.extend(_validate_lengths(data))
     return errors
 
 
@@ -36,6 +51,7 @@ def validate_update(data):
     # email is optional on update, but must be valid when present.
     if "email" in data:
         errors.extend(_validate_email(data, required=True))
+    errors.extend(_validate_lengths(data))
     return errors
 
 

@@ -74,16 +74,51 @@ def test_get_missing_returns_none():
 
 
 def test_list_includes_created_and_filters(created_project):
-    all_rows = list_projects()
-    assert any(p["id"] == created_project["id"] for p in all_rows)
-
-    qa_rows = list_projects(department="QA")
-    assert all(p["department"] == "QA" for p in qa_rows)
-    assert any(p["id"] == created_project["id"] for p in qa_rows)
+    qa = list_projects(department="QA", limit=200)
+    assert qa["items"] and all(p["department"] == "QA" for p in qa["items"])
+    assert any(p["id"] == created_project["id"] for p in qa["items"])
+    assert qa["total"] >= 1 and qa["limit"] == 200 and qa["offset"] == 0
 
     # A department that shouldn't match our row.
     none_rows = list_projects(department="__no_such_department__")
-    assert all(p["id"] != created_project["id"] for p in none_rows)
+    assert none_rows["total"] == 0
+    assert none_rows["items"] == []
+
+
+def test_pagination_slices_and_counts():
+    made = [create_project({"name": f"Pag IT {i}", "department": "PAG-IT"}) for i in range(3)]
+    try:
+        page1 = list_projects(department="PAG-IT", limit=2, offset=0)
+        page2 = list_projects(department="PAG-IT", limit=2, offset=2)
+        assert page1["total"] == 3 and page2["total"] == 3
+        assert len(page1["items"]) == 2 and len(page2["items"]) == 1
+        ids1 = {p["id"] for p in page1["items"]}
+        ids2 = {p["id"] for p in page2["items"]}
+        assert ids1.isdisjoint(ids2)  # no overlap across pages
+    finally:
+        for p in made:
+            delete_project(p["id"])
+
+
+def test_sql_injection_payload_stored_literally():
+    payload = "'; DROP TABLE projects;--"
+    created = create_project({"name": payload, "department": "SQLI-IT"})
+    try:
+        # Stored verbatim as data, not executed...
+        assert get_project(created["id"])["name"] == payload
+        # ...and the table is very much still there.
+        assert list_projects(department="SQLI-IT", limit=10)["total"] >= 1
+    finally:
+        delete_project(created["id"])
+
+
+def test_long_text_description_is_accepted():
+    # description is TEXT (unbounded) -> a very long value is accepted, not a 500.
+    created = create_project({"name": "Long Desc IT", "description": "x" * 10000})
+    try:
+        assert len(get_project(created["id"])["description"]) == 10000
+    finally:
+        delete_project(created["id"])
 
 
 def test_partial_update_preserves_other_fields(created_project):

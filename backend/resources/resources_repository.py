@@ -24,19 +24,30 @@ class DuplicateEmailError(Exception):
 _COLUMNS = "id, name, email, title, created_at"
 
 
-def list_resources(search=None):
-    """
-    Return all resources, optionally filtered by a case-insensitive search that
-    matches either the name or the title.
-    """
-    sql = f"SELECT {_COLUMNS} FROM resources"
-    params = []
+def _resource_filters(search):
+    """Build the shared WHERE clause + params for list/count."""
     if search:
-        sql += " WHERE name ILIKE %s OR title ILIKE %s"
         like = f"%{search}%"
-        params = [like, like]
-    sql += " ORDER BY id"
-    return execute(sql, params, fetch="all")
+        return " WHERE name ILIKE %s OR title ILIKE %s", [like, like]
+    return "", []
+
+
+def list_resources(search=None, limit=50, offset=0):
+    """
+    Return a page of resources plus pagination info. The optional case-insensitive
+    `search` matches either the name or the title.
+
+    Shape: {"items": [...], "total": <int>, "limit": <int>, "offset": <int>}.
+    `total` counts all rows matching the filter, ignoring limit/offset.
+    """
+    where, params = _resource_filters(search)
+    total = execute(f"SELECT COUNT(*) AS n FROM resources{where}", params, fetch="one")["n"]
+    items = execute(
+        f"SELECT {_COLUMNS} FROM resources{where} ORDER BY id LIMIT %s OFFSET %s",
+        params + [limit, offset],
+        fetch="all",
+    )
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 def get_resource(resource_id):

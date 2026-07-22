@@ -13,6 +13,7 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal
 
+import auth
 from projects_repository import (
     list_projects,
     get_project,
@@ -21,6 +22,7 @@ from projects_repository import (
     delete_project,
 )
 from validation import validate_create, validate_update
+from pagination import parse_pagination, PaginationError
 
 # Configure logging for Lambda.
 logger = logging.getLogger()
@@ -113,11 +115,17 @@ def _get_body(event):
 
 def _handle_list(event):
     query = _get_query(event)
-    projects = list_projects(
+    try:
+        limit, offset = parse_pagination(query)
+    except PaginationError as exc:
+        return _error(400, str(exc))
+    result = list_projects(
         status=query.get("status"),
         department=query.get("department"),
+        limit=limit,
+        offset=offset,
     )
-    return _response(200, projects)
+    return _response(200, result)
 
 
 def _handle_get(project_id):
@@ -174,6 +182,8 @@ def handler(event=None, context=None):
 
     try:
         method = _get_method(event)
+        # 401 if unauthenticated / user deleted; 403 if role unknown or lacks permission.
+        auth.authorize_request(event, method, user_exists=auth.db_user_exists)
         project_id = _get_path_id(event)
 
         if method == "GET":
@@ -190,6 +200,8 @@ def handler(event=None, context=None):
             return _handle_delete(project_id)
 
         return _error(405, f"Method {method} not allowed.")
+    except auth.AuthError as err:
+        return err.response
     except json.JSONDecodeError:
         return _error(400, "Request body is not valid JSON.")
     except Exception as e:

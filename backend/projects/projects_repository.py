@@ -15,21 +15,34 @@ _COLUMNS = (
 )
 
 
-def list_projects(status=None, department=None):
-    """Return all projects, optionally filtered by status and/or department."""
-    sql = f"SELECT {_COLUMNS} FROM projects"
-    clauses = []
-    params = []
+def _project_filters(status, department):
+    """Build the shared WHERE clause + params for list/count."""
+    clauses, params = [], []
     if status:
         clauses.append("status = %s")
         params.append(status)
     if department:
         clauses.append("department = %s")
         params.append(department)
-    if clauses:
-        sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY id"
-    return execute(sql, params, fetch="all")
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    return where, params
+
+
+def list_projects(status=None, department=None, limit=50, offset=0):
+    """
+    Return a page of projects (optionally filtered) plus pagination info.
+
+    Shape: {"items": [...], "total": <int>, "limit": <int>, "offset": <int>}.
+    `total` counts all rows matching the filters, ignoring limit/offset.
+    """
+    where, params = _project_filters(status, department)
+    total = execute(f"SELECT COUNT(*) AS n FROM projects{where}", params, fetch="one")["n"]
+    items = execute(
+        f"SELECT {_COLUMNS} FROM projects{where} ORDER BY id LIMIT %s OFFSET %s",
+        params + [limit, offset],
+        fetch="all",
+    )
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 def get_project(project_id):

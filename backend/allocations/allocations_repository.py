@@ -30,21 +30,34 @@ class DuplicateAllocationError(Exception):
 _COLUMNS = "id, resource_id, project_id, allocation_pct, start_date, end_date"
 
 
-def list_allocations(resource_id=None, project_id=None):
-    """Return all allocations, optionally filtered by resource_id and/or project_id."""
-    sql = f"SELECT {_COLUMNS} FROM allocations"
-    clauses = []
-    params = []
+def _allocation_filters(resource_id, project_id):
+    """Build the shared WHERE clause + params for list/count."""
+    clauses, params = [], []
     if resource_id:
         clauses.append("resource_id = %s")
         params.append(resource_id)
     if project_id:
         clauses.append("project_id = %s")
         params.append(project_id)
-    if clauses:
-        sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY id"
-    return execute(sql, params, fetch="all")
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    return where, params
+
+
+def list_allocations(resource_id=None, project_id=None, limit=50, offset=0):
+    """
+    Return a page of allocations (optionally filtered) plus pagination info.
+
+    Shape: {"items": [...], "total": <int>, "limit": <int>, "offset": <int>}.
+    `total` counts all rows matching the filters, ignoring limit/offset.
+    """
+    where, params = _allocation_filters(resource_id, project_id)
+    total = execute(f"SELECT COUNT(*) AS n FROM allocations{where}", params, fetch="one")["n"]
+    items = execute(
+        f"SELECT {_COLUMNS} FROM allocations{where} ORDER BY id LIMIT %s OFFSET %s",
+        params + [limit, offset],
+        fetch="all",
+    )
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 def get_allocation(allocation_id):

@@ -11,6 +11,7 @@ from datetime import datetime
 
 import pytest
 
+import auth
 import function
 from resources_repository import DuplicateEmailError
 
@@ -63,7 +64,7 @@ def repo(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_list_returns_200_and_passes_search(repo):
-    repo.set("list_resources", [SAMPLE_RESOURCE])
+    repo.set("list_resources", {"items": [SAMPLE_RESOURCE], "total": 1, "limit": 50, "offset": 0})
     event = {
         "httpMethod": "GET",
         "path": "/resources",
@@ -71,15 +72,17 @@ def test_list_returns_200_and_passes_search(repo):
     }
     resp = function.handler(event)
     assert resp["statusCode"] == 200
-    assert _body(resp)[0]["name"] == "Ada Lovelace"
-    assert repo.calls["list_resources"]["kwargs"] == {"search": "ada"}
+    body = _body(resp)
+    assert body["items"][0]["name"] == "Ada Lovelace"
+    assert body["total"] == 1 and body["limit"] == 50 and body["offset"] == 0
+    assert repo.calls["list_resources"]["kwargs"] == {"search": "ada", "limit": 50, "offset": 0}
 
 
 def test_list_without_search_passes_none(repo):
-    repo.set("list_resources", [])
+    repo.set("list_resources", {"items": [], "total": 0, "limit": 50, "offset": 0})
     resp = function.handler({"httpMethod": "GET", "path": "/resources"})
     assert resp["statusCode"] == 200
-    assert repo.calls["list_resources"]["kwargs"] == {"search": None}
+    assert repo.calls["list_resources"]["kwargs"] == {"search": None, "limit": 50, "offset": 0}
 
 
 def test_get_one_found_returns_200(repo):
@@ -229,3 +232,122 @@ def test_response_serializes_datetime(repo):
     resp = function.handler({"httpMethod": "GET", "path": "/resources/1"})
     body = _body(resp)
     assert body["created_at"].startswith("2026-01-01")  # datetime -> ISO string
+
+
+# ---------------------------------------------------------------------------
+# Authentication + RBAC gate
+# ---------------------------------------------------------------------------
+
+def _hdr(role):
+    token = auth.create_token({"sub": "1", "username": "u", "role": role})
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_missing_token_returns_401(repo):
+    resp = function.handler({"httpMethod": "GET", "path": "/resources", "headers": {}})
+    assert resp["statusCode"] == 401
+
+
+def test_invalid_token_returns_401(repo):
+    resp = function.handler({"httpMethod": "GET", "path": "/resources",
+                             "headers": {"Authorization": "Bearer not.a.jwt"}})
+    assert resp["statusCode"] == 401
+
+
+def test_viewer_can_read(repo):
+    repo.set("list_resources", [])
+    resp = function.handler({"httpMethod": "GET", "path": "/resources", "headers": _hdr("Viewer")})
+    assert resp["statusCode"] == 200
+
+
+def test_viewer_cannot_create_returns_403(repo):
+    repo.set("create_resource", SAMPLE_RESOURCE)  # must not be reached
+    resp = function.handler({"httpMethod": "POST", "path": "/resources",
+                             "headers": _hdr("Viewer"),
+                             "body": json.dumps({"name": "X", "email": "x@example.com"})})
+    assert resp["statusCode"] == 403
+    assert "create_resource" not in repo.calls
+
+
+def test_contributor_can_create_returns_201(repo):
+    repo.set("create_resource", SAMPLE_RESOURCE)
+    resp = function.handler({"httpMethod": "POST", "path": "/resources",
+                             "headers": _hdr("Contributor"),
+                             "body": json.dumps({"name": "X", "email": "x@example.com"})})
+    assert resp["statusCode"] == 201
+
+
+def test_contributor_cannot_delete_returns_403(repo):
+    repo.set("delete_resource", {"id": 1})  # must not be reached
+    resp = function.handler({"httpMethod": "DELETE", "path": "/resources/1", "headers": _hdr("Contributor")})
+    assert resp["statusCode"] == 403
+    assert "delete_resource" not in repo.calls
+
+
+def test_manager_can_delete_returns_204(repo):
+    repo.set("delete_resource", {"id": 1})
+    resp = function.handler({"httpMethod": "DELETE", "path": "/resources/1", "headers": _hdr("Manager")})
+    assert resp["statusCode"] == 204
+
+
+def test_deleted_user_token_returns_401(repo, monkeypatch):
+    monkeypatch.setattr(function.auth, "db_user_exists", lambda uid: False)
+    resp = function.handler({"httpMethod": "GET", "path": "/resources", "headers": _hdr("Admin")})
+    assert resp["statusCode"] == 401
+
+
+def test_bogus_role_token_returns_403(repo):
+    resp = function.handler({"httpMethod": "GET", "path": "/resources", "headers": _hdr("Wizard")})
+    assert resp["statusCode"] == 403
+
+
+# ---------------------------------------------------------------------------
+# Pagination
+# ---------------------------------------------------------------------------
+
+def test_list_custom_pagination_passed(repo):
+    repo.set("list_resources", {"items": [], "total": 0, "limit": 5, "offset": 15})
+    function.handler({"httpMethod": "GET", "path": "/resources",
+                      "queryStringParameters": {"limit": "5", "offset": "15"}})
+    assert repo.calls["list_resources"]["kwargs"]["limit"] == 5
+    assert repo.calls["list_resources"]["kwargs"]["offset"] == 15
+
+
+def test_list_limit_capped_at_max(repo):
+    repo.set("list_resources", {"items": [], "total": 0, "limit": 200, "offset": 0})
+    function.handler({"httpMethod": "GET", "path": "/resources",
+                      "queryStringParameters": {"limit": "99999"}})
+    assert repo.calls["list_resources"]["kwargs"]["limit"] == 200
+
+
+def test_list_invalid_limit_returns_400(repo):
+    resp = function.handler({"httpMethod": "GET", "path": "/resources",
+                             "queryStringParameters": {"limit": "ten"}})
+    assert resp["statusCode"] == 400
+
+
+# ---------------------------------------------------------------------------
+# Input robustness
+# ---------------------------------------------------------------------------
+
+def test_whitespace_only_name_returns_400(repo):
+    resp = function.handler({"httpMethod": "POST", "path": "/resources",
+                             "body": json.dumps({"name": "   ", "email": "a@b.com"})})
+    assert resp["statusCode"] == 400
+    assert "create_resource" not in repo.calls
+
+
+def test_overlong_name_returns_400_not_500(repo):
+    resp = function.handler({"httpMethod": "POST", "path": "/resources",
+                             "body": json.dumps({"name": "x" * 10000, "email": "a@b.com"})})
+    assert resp["statusCode"] == 400
+    assert "create_resource" not in repo.calls
+
+
+def test_sql_injection_name_is_treated_as_data(repo):
+    repo.set("create_resource", SAMPLE_RESOURCE)
+    payload = "'; DROP TABLE resources;--"
+    resp = function.handler({"httpMethod": "POST", "path": "/resources",
+                             "body": json.dumps({"name": payload, "email": "a@b.com"})})
+    assert resp["statusCode"] == 201
+    assert repo.calls["create_resource"]["args"][0]["name"] == payload

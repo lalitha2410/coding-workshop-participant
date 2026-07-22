@@ -39,9 +39,20 @@ def validate_update(data):
     return errors
 
 
+# Max lengths for VARCHAR-bounded columns (schema.sql). TEXT fields (description)
+# are unbounded and accept long input. Enforcing these keeps over-long strings a
+# clean 400 instead of a database error (500).
+_MAX_LENGTHS = {"name": 200, "department": 100}
+
+
 def _validate_common(data):
-    """Format/enum checks that apply to both create and update payloads."""
+    """Format/enum/length checks that apply to both create and update payloads."""
     errors = []
+
+    for field, max_len in _MAX_LENGTHS.items():
+        value = data.get(field)
+        if isinstance(value, str) and len(value) > max_len:
+            errors.append(f"`{field}` must be at most {max_len} characters.")
 
     status = data.get("status")
     if status is not None and status not in VALID_STATUSES:

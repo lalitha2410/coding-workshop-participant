@@ -105,16 +105,18 @@ def test_list_filters(env):
     a2 = create_allocation({"resource_id": env["r1"], "project_id": env["p2"], "allocation_pct": 20})
     a3 = create_allocation({"resource_id": env["r2"], "project_id": env["p1"], "allocation_pct": 30})
 
-    by_resource = list_allocations(resource_id=env["r1"])
-    ids = {a["id"] for a in by_resource}
+    by_resource = list_allocations(resource_id=env["r1"], limit=200)
+    ids = {a["id"] for a in by_resource["items"]}
     assert a1["id"] in ids and a2["id"] in ids and a3["id"] not in ids
+    assert by_resource["total"] == 2 and by_resource["limit"] == 200
 
-    by_project = list_allocations(project_id=env["p1"])
-    ids = {a["id"] for a in by_project}
+    by_project = list_allocations(project_id=env["p1"], limit=200)
+    ids = {a["id"] for a in by_project["items"]}
     assert a1["id"] in ids and a3["id"] in ids and a2["id"] not in ids
 
     both = list_allocations(resource_id=env["r1"], project_id=env["p2"])
-    assert [a["id"] for a in both] == [a2["id"]]
+    assert [a["id"] for a in both["items"]] == [a2["id"]]
+    assert both["total"] == 1
 
 
 def test_partial_update_preserves_other_fields(env):
@@ -180,6 +182,16 @@ def test_over_allocation_calculation(env):
     assert summary_by_id[env["r1"]]["over_allocated"] is True
     assert summary_by_id[env["r2"]]["total_allocation_pct"] == 50
     assert summary_by_id[env["r2"]]["over_allocated"] is False
+
+
+def test_pagination_slices_and_counts(env):
+    create_allocation({"resource_id": env["r1"], "project_id": env["p1"], "allocation_pct": 10})
+    create_allocation({"resource_id": env["r1"], "project_id": env["p2"], "allocation_pct": 20})
+    page1 = list_allocations(resource_id=env["r1"], limit=1, offset=0)
+    page2 = list_allocations(resource_id=env["r1"], limit=1, offset=1)
+    assert page1["total"] == 2 and page2["total"] == 2
+    assert len(page1["items"]) == 1 and len(page2["items"]) == 1
+    assert page1["items"][0]["id"] != page2["items"][0]["id"]  # distinct pages
 
 
 def test_exactly_100_is_not_over_allocated(env):

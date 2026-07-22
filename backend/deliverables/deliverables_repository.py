@@ -14,21 +14,34 @@ _COLUMNS = (
 )
 
 
-def list_deliverables(project_id=None, status=None):
-    """Return all deliverables, optionally filtered by project_id and/or status."""
-    sql = f"SELECT {_COLUMNS} FROM deliverables"
-    clauses = []
-    params = []
+def _deliverable_filters(project_id, status):
+    """Build the shared WHERE clause + params for list/count."""
+    clauses, params = [], []
     if project_id:
         clauses.append("project_id = %s")
         params.append(project_id)
     if status:
         clauses.append("status = %s")
         params.append(status)
-    if clauses:
-        sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY id"
-    return execute(sql, params, fetch="all")
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    return where, params
+
+
+def list_deliverables(project_id=None, status=None, limit=50, offset=0):
+    """
+    Return a page of deliverables (optionally filtered) plus pagination info.
+
+    Shape: {"items": [...], "total": <int>, "limit": <int>, "offset": <int>}.
+    `total` counts all rows matching the filters, ignoring limit/offset.
+    """
+    where, params = _deliverable_filters(project_id, status)
+    total = execute(f"SELECT COUNT(*) AS n FROM deliverables{where}", params, fetch="one")["n"]
+    items = execute(
+        f"SELECT {_COLUMNS} FROM deliverables{where} ORDER BY id LIMIT %s OFFSET %s",
+        params + [limit, offset],
+        fetch="all",
+    )
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 def get_deliverable(deliverable_id):

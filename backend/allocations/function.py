@@ -17,6 +17,7 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal
 
+import auth
 from allocations_repository import (
     list_allocations,
     get_allocation,
@@ -29,6 +30,7 @@ from allocations_repository import (
     DuplicateAllocationError,
 )
 from validation import validate_create, validate_update
+from pagination import parse_pagination, PaginationError
 
 # Configure logging for Lambda.
 logger = logging.getLogger()
@@ -139,11 +141,17 @@ def _missing_references(data):
 
 def _handle_list(event):
     query = _get_query(event)
-    allocations = list_allocations(
+    try:
+        limit, offset = parse_pagination(query)
+    except PaginationError as exc:
+        return _error(400, str(exc))
+    result = list_allocations(
         resource_id=query.get("resource_id"),
         project_id=query.get("project_id"),
+        limit=limit,
+        offset=offset,
     )
-    return _response(200, allocations)
+    return _response(200, result)
 
 
 def _handle_summary(over_only):
@@ -223,6 +231,8 @@ def handler(event=None, context=None):
 
     try:
         method = _get_method(event)
+        # 401 if unauthenticated / user deleted; 403 if role unknown or lacks permission.
+        auth.authorize_request(event, method, user_exists=auth.db_user_exists)
         allocation_id = _get_path_id(event)
 
         if method == "GET":
@@ -245,6 +255,8 @@ def handler(event=None, context=None):
             return _handle_delete(allocation_id)
 
         return _error(405, f"Method {method} not allowed.")
+    except auth.AuthError as err:
+        return err.response
     except json.JSONDecodeError:
         return _error(400, "Request body is not valid JSON.")
     except Exception as e:

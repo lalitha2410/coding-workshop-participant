@@ -80,20 +80,45 @@ def test_get_missing_returns_none():
 
 
 def test_list_and_search(created_resource):
-    all_rows = list_resources()
-    assert any(r["id"] == created_resource["id"] for r in all_rows)
-
     # Search matches on name...
-    by_name = list_resources(search="Integration Resource")
-    assert any(r["id"] == created_resource["id"] for r in by_name)
+    by_name = list_resources(search="Integration Resource", limit=200)
+    assert any(r["id"] == created_resource["id"] for r in by_name["items"])
+    assert by_name["total"] >= 1 and by_name["limit"] == 200
 
     # ...and on title.
     by_title = list_resources(search="QA Engineer")
-    assert any(r["id"] == created_resource["id"] for r in by_title)
+    assert any(r["id"] == created_resource["id"] for r in by_title["items"])
 
     # A non-matching search excludes the row.
     none_rows = list_resources(search="__no_such_resource__")
-    assert all(r["id"] != created_resource["id"] for r in none_rows)
+    assert none_rows["total"] == 0 and none_rows["items"] == []
+
+
+def test_pagination_slices_and_counts():
+    emails = [f"pag-it-{i}@example-test.invalid" for i in range(3)]
+    made = [create_resource({"name": f"Pag {i}", "email": e, "title": "PAGIT-ROLE"})
+            for i, e in enumerate(emails)]
+    try:
+        page1 = list_resources(search="PAGIT-ROLE", limit=2, offset=0)
+        page2 = list_resources(search="PAGIT-ROLE", limit=2, offset=2)
+        assert page1["total"] == 3 and page2["total"] == 3
+        assert len(page1["items"]) == 2 and len(page2["items"]) == 1
+        ids1 = {r["id"] for r in page1["items"]}
+        ids2 = {r["id"] for r in page2["items"]}
+        assert ids1.isdisjoint(ids2)
+    finally:
+        for r in made:
+            delete_resource(r["id"])
+
+
+def test_sql_injection_payload_stored_literally():
+    payload = "'; DROP TABLE resources;--"
+    created = create_resource({"name": payload, "email": "sqli-it@example-test.invalid"})
+    try:
+        assert get_resource(created["id"])["name"] == payload  # literal data, not executed
+        assert list_resources(search="DROP TABLE", limit=10)["total"] >= 1  # table intact
+    finally:
+        delete_resource(created["id"])
 
 
 def test_partial_update_preserves_other_fields(created_resource):

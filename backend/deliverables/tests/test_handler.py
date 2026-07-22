@@ -11,6 +11,7 @@ from datetime import date
 
 import pytest
 
+import auth
 import function
 
 
@@ -68,7 +69,7 @@ def repo(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_list_returns_200_and_passes_filters(repo):
-    repo.set("list_deliverables", [SAMPLE_DELIVERABLE])
+    repo.set("list_deliverables", {"items": [SAMPLE_DELIVERABLE], "total": 1, "limit": 50, "offset": 0})
     event = {
         "httpMethod": "GET",
         "path": "/deliverables",
@@ -76,8 +77,12 @@ def test_list_returns_200_and_passes_filters(repo):
     }
     resp = function.handler(event)
     assert resp["statusCode"] == 200
-    assert _body(resp)[0]["name"] == "Design doc"
-    assert repo.calls["list_deliverables"]["kwargs"] == {"project_id": "10", "status": "in_progress"}
+    body = _body(resp)
+    assert body["items"][0]["name"] == "Design doc"
+    assert body["total"] == 1 and body["limit"] == 50 and body["offset"] == 0
+    assert repo.calls["list_deliverables"]["kwargs"] == {
+        "project_id": "10", "status": "in_progress", "limit": 50, "offset": 0,
+    }
 
 
 def test_get_one_found_returns_200(repo):
@@ -230,3 +235,122 @@ def test_response_serializes_dates(repo):
     resp = function.handler({"httpMethod": "GET", "path": "/deliverables/1"})
     body = _body(resp)
     assert body["due_date"] == "2026-06-30"  # date -> ISO string
+
+
+# ---------------------------------------------------------------------------
+# Authentication + RBAC gate
+# ---------------------------------------------------------------------------
+
+def _hdr(role):
+    token = auth.create_token({"sub": "1", "username": "u", "role": role})
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_missing_token_returns_401(repo):
+    resp = function.handler({"httpMethod": "GET", "path": "/deliverables", "headers": {}})
+    assert resp["statusCode"] == 401
+
+
+def test_invalid_token_returns_401(repo):
+    resp = function.handler({"httpMethod": "GET", "path": "/deliverables",
+                             "headers": {"Authorization": "Bearer not.a.jwt"}})
+    assert resp["statusCode"] == 401
+
+
+def test_viewer_can_read(repo):
+    repo.set("list_deliverables", [])
+    resp = function.handler({"httpMethod": "GET", "path": "/deliverables", "headers": _hdr("Viewer")})
+    assert resp["statusCode"] == 200
+
+
+def test_viewer_cannot_create_returns_403(repo):
+    repo.set("create_deliverable", SAMPLE_DELIVERABLE)  # must not be reached
+    resp = function.handler({"httpMethod": "POST", "path": "/deliverables",
+                             "headers": _hdr("Viewer"),
+                             "body": json.dumps({"project_id": 10, "name": "X"})})
+    assert resp["statusCode"] == 403
+    assert "create_deliverable" not in repo.calls
+
+
+def test_contributor_can_create_returns_201(repo):
+    repo.set("create_deliverable", SAMPLE_DELIVERABLE)
+    resp = function.handler({"httpMethod": "POST", "path": "/deliverables",
+                             "headers": _hdr("Contributor"),
+                             "body": json.dumps({"project_id": 10, "name": "X"})})
+    assert resp["statusCode"] == 201
+
+
+def test_contributor_cannot_delete_returns_403(repo):
+    repo.set("delete_deliverable", {"id": 1})  # must not be reached
+    resp = function.handler({"httpMethod": "DELETE", "path": "/deliverables/1", "headers": _hdr("Contributor")})
+    assert resp["statusCode"] == 403
+    assert "delete_deliverable" not in repo.calls
+
+
+def test_manager_can_delete_returns_204(repo):
+    repo.set("delete_deliverable", {"id": 1})
+    resp = function.handler({"httpMethod": "DELETE", "path": "/deliverables/1", "headers": _hdr("Manager")})
+    assert resp["statusCode"] == 204
+
+
+def test_deleted_user_token_returns_401(repo, monkeypatch):
+    monkeypatch.setattr(function.auth, "db_user_exists", lambda uid: False)
+    resp = function.handler({"httpMethod": "GET", "path": "/deliverables", "headers": _hdr("Admin")})
+    assert resp["statusCode"] == 401
+
+
+def test_bogus_role_token_returns_403(repo):
+    resp = function.handler({"httpMethod": "GET", "path": "/deliverables", "headers": _hdr("Wizard")})
+    assert resp["statusCode"] == 403
+
+
+# ---------------------------------------------------------------------------
+# Pagination
+# ---------------------------------------------------------------------------
+
+def test_list_custom_pagination_passed(repo):
+    repo.set("list_deliverables", {"items": [], "total": 0, "limit": 10, "offset": 20})
+    function.handler({"httpMethod": "GET", "path": "/deliverables",
+                      "queryStringParameters": {"limit": "10", "offset": "20"}})
+    assert repo.calls["list_deliverables"]["kwargs"]["limit"] == 10
+    assert repo.calls["list_deliverables"]["kwargs"]["offset"] == 20
+
+
+def test_list_limit_capped_at_max(repo):
+    repo.set("list_deliverables", {"items": [], "total": 0, "limit": 200, "offset": 0})
+    function.handler({"httpMethod": "GET", "path": "/deliverables",
+                      "queryStringParameters": {"limit": "99999"}})
+    assert repo.calls["list_deliverables"]["kwargs"]["limit"] == 200
+
+
+def test_list_invalid_offset_returns_400(repo):
+    resp = function.handler({"httpMethod": "GET", "path": "/deliverables",
+                             "queryStringParameters": {"offset": "-3"}})
+    assert resp["statusCode"] == 400
+
+
+# ---------------------------------------------------------------------------
+# Input robustness
+# ---------------------------------------------------------------------------
+
+def test_whitespace_only_name_returns_400(repo):
+    resp = function.handler({"httpMethod": "POST", "path": "/deliverables",
+                             "body": json.dumps({"project_id": 10, "name": "   "})})
+    assert resp["statusCode"] == 400
+    assert "create_deliverable" not in repo.calls
+
+
+def test_overlong_name_returns_400_not_500(repo):
+    resp = function.handler({"httpMethod": "POST", "path": "/deliverables",
+                             "body": json.dumps({"project_id": 10, "name": "x" * 10000})})
+    assert resp["statusCode"] == 400
+    assert "create_deliverable" not in repo.calls
+
+
+def test_sql_injection_name_is_treated_as_data(repo):
+    repo.set("create_deliverable", SAMPLE_DELIVERABLE)
+    payload = "'; DROP TABLE deliverables;--"
+    resp = function.handler({"httpMethod": "POST", "path": "/deliverables",
+                             "body": json.dumps({"project_id": 10, "name": payload})})
+    assert resp["statusCode"] == 201
+    assert repo.calls["create_deliverable"]["args"][0]["name"] == payload
