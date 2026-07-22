@@ -186,3 +186,19 @@ def test_exactly_100_is_not_over_allocated(env):
     create_allocation({"resource_id": env["r1"], "project_id": env["p1"], "allocation_pct": 100})
     over_ids = {row["resource_id"] for row in resource_allocation_totals(over_only=True)}
     assert env["r1"] not in over_ids  # 100% is fully allocated, not OVER
+
+
+def test_summary_includes_unallocated_resource(env):
+    # Allocate r1 but leave r2 with no allocations at all.
+    create_allocation({"resource_id": env["r1"], "project_id": env["p1"], "allocation_pct": 30})
+
+    summary = {row["resource_id"]: row for row in resource_allocation_totals(over_only=False)}
+    # LEFT JOIN: the unallocated resource still appears, at 0%.
+    assert env["r2"] in summary, "unallocated resource should appear in /summary (LEFT JOIN)"
+    assert summary[env["r2"]]["total_allocation_pct"] == 0
+    assert summary[env["r2"]]["project_count"] == 0
+    assert summary[env["r2"]]["over_allocated"] is False
+
+    # But it must NOT appear in the over-allocated (INNER JOIN) view.
+    over_ids = {row["resource_id"] for row in resource_allocation_totals(over_only=True)}
+    assert env["r2"] not in over_ids

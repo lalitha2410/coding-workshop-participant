@@ -132,14 +132,19 @@ def resource_allocation_totals(over_only=False):
     """
     Sum each resource's allocation percentage across all of its projects.
 
-    Returns one row per resource that has at least one allocation:
+    Each row is:
         {resource_id, resource_name, email, total_allocation_pct,
          project_count, over_allocated}
     where over_allocated is True when the summed percentage exceeds 100.
 
-    When over_only is True, only over-allocated resources are returned. Answers
-    the workshop question "which team members are over-allocated across projects".
+    over_only=False (summary): LEFT JOIN, so EVERY resource is listed, including
+        those with no allocations (total 0, over_allocated False) — useful for
+        spotting underutilized/available people.
+    over_only=True (over-allocated): INNER JOIN + HAVING > 100, so only resources
+        that are actually over-allocated appear. Answers the workshop question
+        "which team members are over-allocated across projects".
     """
+    join = "JOIN" if over_only else "LEFT JOIN"
     having = "HAVING COALESCE(SUM(a.allocation_pct), 0) > 100" if over_only else ""
     sql = f"""
         SELECT r.id                             AS resource_id,
@@ -148,7 +153,7 @@ def resource_allocation_totals(over_only=False):
                COALESCE(SUM(a.allocation_pct), 0) AS total_allocation_pct,
                COUNT(a.id)                      AS project_count
         FROM resources r
-        JOIN allocations a ON a.resource_id = r.id
+        {join} allocations a ON a.resource_id = r.id
         GROUP BY r.id, r.name, r.email
         {having}
         ORDER BY total_allocation_pct DESC, r.id
