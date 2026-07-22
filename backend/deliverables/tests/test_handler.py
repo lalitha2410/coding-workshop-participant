@@ -354,3 +354,128 @@ def test_sql_injection_name_is_treated_as_data(repo):
                              "body": json.dumps({"project_id": 10, "name": payload})})
     assert resp["statusCode"] == 201
     assert repo.calls["create_deliverable"]["args"][0]["name"] == payload
+
+
+# ---------------------------------------------------------------------------
+# Dependencies  (/deliverables/{id}/dependencies[/{depends_on_id}])
+# ---------------------------------------------------------------------------
+
+from deliverables_repository import DuplicateDependencyError  # noqa: E402
+
+
+def test_get_dependencies_200(repo, monkeypatch):
+    monkeypatch.setattr(function, "deliverable_exists", lambda i: True)
+    monkeypatch.setattr(function, "get_dependencies", lambda i: [{"id": 2, "name": "B", "status": "in_progress"}])
+    monkeypatch.setattr(function, "get_dependents", lambda i: [{"id": 9, "name": "Z", "status": "blocked"}])
+    resp = function.handler({"httpMethod": "GET", "path": "/deliverables/5/dependencies"})
+    assert resp["statusCode"] == 200
+    body = _body(resp)
+    assert body["deliverable_id"] == 5
+    assert body["depends_on"][0]["id"] == 2
+    assert body["dependents"][0]["id"] == 9
+
+
+def test_get_dependencies_unknown_deliverable_404(repo, monkeypatch):
+    monkeypatch.setattr(function, "deliverable_exists", lambda i: False)
+    resp = function.handler({"httpMethod": "GET", "path": "/deliverables/9999/dependencies"})
+    assert resp["statusCode"] == 404
+
+
+def test_add_dependency_201(repo, monkeypatch):
+    monkeypatch.setattr(function, "deliverable_exists", lambda i: True)
+    monkeypatch.setattr(function, "path_exists", lambda a, b: False)
+    seen = {}
+    monkeypatch.setattr(function, "add_dependency", lambda d, o: (seen.update(d=d, o=o) or {"deliverable_id": d, "depends_on_id": o}))
+    resp = function.handler({"httpMethod": "POST", "path": "/deliverables/5/dependencies", "body": json.dumps({"depends_on_id": 2})})
+    assert resp["statusCode"] == 201
+    assert _body(resp) == {"deliverable_id": 5, "depends_on_id": 2}
+    assert seen == {"d": 5, "o": 2}
+
+
+def test_add_dependency_self_400(repo, monkeypatch):
+    monkeypatch.setattr(function, "deliverable_exists", lambda i: True)
+    resp = function.handler({"httpMethod": "POST", "path": "/deliverables/5/dependencies", "body": json.dumps({"depends_on_id": 5})})
+    assert resp["statusCode"] == 400
+    assert "itself" in _body(resp)["error"]
+
+
+def test_add_dependency_missing_field_400(repo, monkeypatch):
+    monkeypatch.setattr(function, "deliverable_exists", lambda i: True)
+    resp = function.handler({"httpMethod": "POST", "path": "/deliverables/5/dependencies", "body": json.dumps({})})
+    assert resp["statusCode"] == 400
+    assert "depends_on_id" in _body(resp)["error"]
+
+
+def test_add_dependency_missing_target_400(repo, monkeypatch):
+    monkeypatch.setattr(function, "deliverable_exists", lambda i: i == 5)  # base exists, target (2) does not
+    resp = function.handler({"httpMethod": "POST", "path": "/deliverables/5/dependencies", "body": json.dumps({"depends_on_id": 2})})
+    assert resp["statusCode"] == 400
+    assert "does not exist" in _body(resp)["error"]
+
+
+def test_add_dependency_cycle_400(repo, monkeypatch):
+    monkeypatch.setattr(function, "deliverable_exists", lambda i: True)
+    monkeypatch.setattr(function, "path_exists", lambda a, b: True)  # target already reaches base
+    hit = {}
+    monkeypatch.setattr(function, "add_dependency", lambda d, o: hit.update(called=True))
+    resp = function.handler({"httpMethod": "POST", "path": "/deliverables/5/dependencies", "body": json.dumps({"depends_on_id": 2})})
+    assert resp["statusCode"] == 400
+    assert "cycle" in _body(resp)["error"].lower()
+    assert "called" not in hit  # never reached the insert
+
+
+def test_add_dependency_duplicate_400(repo, monkeypatch):
+    monkeypatch.setattr(function, "deliverable_exists", lambda i: True)
+    monkeypatch.setattr(function, "path_exists", lambda a, b: False)
+
+    def _dup(d, o):
+        raise DuplicateDependencyError((d, o))
+    monkeypatch.setattr(function, "add_dependency", _dup)
+    resp = function.handler({"httpMethod": "POST", "path": "/deliverables/5/dependencies", "body": json.dumps({"depends_on_id": 2})})
+    assert resp["statusCode"] == 400
+    assert "already depends" in _body(resp)["error"]
+
+
+def test_add_dependency_viewer_403(repo, monkeypatch):
+    monkeypatch.setattr(function, "deliverable_exists", lambda i: True)
+    monkeypatch.setattr(function, "add_dependency", lambda d, o: {"deliverable_id": d, "depends_on_id": o})
+    resp = function.handler({"httpMethod": "POST", "path": "/deliverables/5/dependencies",
+                             "headers": _hdr("Viewer"), "body": json.dumps({"depends_on_id": 2})})
+    assert resp["statusCode"] == 403
+
+
+def test_add_dependency_contributor_201(repo, monkeypatch):
+    monkeypatch.setattr(function, "deliverable_exists", lambda i: True)
+    monkeypatch.setattr(function, "path_exists", lambda a, b: False)
+    monkeypatch.setattr(function, "add_dependency", lambda d, o: {"deliverable_id": d, "depends_on_id": o})
+    resp = function.handler({"httpMethod": "POST", "path": "/deliverables/5/dependencies",
+                             "headers": _hdr("Contributor"), "body": json.dumps({"depends_on_id": 2})})
+    assert resp["statusCode"] == 201
+
+
+def test_remove_dependency_204(repo, monkeypatch):
+    monkeypatch.setattr(function, "remove_dependency", lambda d, o: {"deliverable_id": d, "depends_on_id": o})
+    resp = function.handler({"httpMethod": "DELETE", "path": "/deliverables/5/dependencies/2"})
+    assert resp["statusCode"] == 204
+    assert resp["body"] == ""
+
+
+def test_remove_dependency_missing_404(repo, monkeypatch):
+    monkeypatch.setattr(function, "remove_dependency", lambda d, o: None)
+    resp = function.handler({"httpMethod": "DELETE", "path": "/deliverables/5/dependencies/2"})
+    assert resp["statusCode"] == 404
+
+
+def test_remove_dependency_contributor_204(repo, monkeypatch):
+    # Contributor+ can remove a dependency (it is NOT Manager-only like a deliverable delete).
+    monkeypatch.setattr(function, "remove_dependency", lambda d, o: {"deliverable_id": d, "depends_on_id": o})
+    resp = function.handler({"httpMethod": "DELETE", "path": "/deliverables/5/dependencies/2", "headers": _hdr("Contributor")})
+    assert resp["statusCode"] == 204
+
+
+def test_remove_dependency_viewer_403(repo, monkeypatch):
+    called = {}
+    monkeypatch.setattr(function, "remove_dependency", lambda d, o: called.update(hit=True))
+    resp = function.handler({"httpMethod": "DELETE", "path": "/deliverables/5/dependencies/2", "headers": _hdr("Viewer")})
+    assert resp["statusCode"] == 403
+    assert "hit" not in called

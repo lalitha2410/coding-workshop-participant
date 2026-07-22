@@ -6,7 +6,9 @@ import {
 import AddIcon from '@mui/icons-material/AddRounded';
 import EditIcon from '@mui/icons-material/EditOutlined';
 import DeleteIcon from '@mui/icons-material/DeleteOutline';
+import DependenciesIcon from '@mui/icons-material/AccountTreeOutlined';
 import { PageHeader } from '../../components/common/PageHeader';
+import { DependenciesDialog } from './DependenciesDialog';
 import { StatusChip } from '../../components/data/StatusChip';
 import { ResultStates, TableSkeleton, EmptyState } from '../../components/data/ResultStates';
 import { PaginationBar } from '../../components/data/PaginationBar';
@@ -30,6 +32,7 @@ export default function DeliverablesPage() {
   const projectName = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p.name])), [projects]);
 
   const [form, setForm] = useState({ open: false, deliverable: null });
+  const [depsFor, setDepsFor] = useState(null);
   const [del, setDel] = useState({ open: false, deliverable: null, busy: false });
 
   const canCreate = can(role, 'create');
@@ -89,7 +92,7 @@ export default function DeliverablesPage() {
                 <TableCell>Status</TableCell>
                 <TableCell sx={{ minWidth: 160 }}>Completion</TableCell>
                 <TableCell>Due</TableCell>
-                {(canUpdate || canDelete) && <TableCell align="right" width={96}>Actions</TableCell>}
+                <TableCell align="right" width={132}>Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -107,14 +110,13 @@ export default function DeliverablesPage() {
                     </Box>
                   </TableCell>
                   <TableCell className="mono" sx={{ whiteSpace: 'nowrap' }}>{fmtDate(d.due_date)}</TableCell>
-                  {(canUpdate || canDelete) && (
-                    <TableCell align="right">
-                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 0.25 }}>
-                        {canUpdate && <Tooltip title="Edit"><IconButton size="small" onClick={() => setForm({ open: true, deliverable: d })}><EditIcon sx={{ fontSize: 18 }} /></IconButton></Tooltip>}
-                        {canDelete && <Tooltip title="Delete"><IconButton size="small" onClick={() => setDel({ open: true, deliverable: d, busy: false })}><DeleteIcon sx={{ fontSize: 18 }} /></IconButton></Tooltip>}
-                      </Box>
-                    </TableCell>
-                  )}
+                  <TableCell align="right">
+                    <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 0.25 }}>
+                      <Tooltip title="Dependencies"><IconButton size="small" onClick={() => setDepsFor(d)}><DependenciesIcon sx={{ fontSize: 18 }} /></IconButton></Tooltip>
+                      {canUpdate && <Tooltip title="Edit"><IconButton size="small" onClick={() => setForm({ open: true, deliverable: d })}><EditIcon sx={{ fontSize: 18 }} /></IconButton></Tooltip>}
+                      {canDelete && <Tooltip title="Delete"><IconButton size="small" onClick={() => setDel({ open: true, deliverable: d, busy: false })}><DeleteIcon sx={{ fontSize: 18 }} /></IconButton></Tooltip>}
+                    </Box>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -134,6 +136,9 @@ export default function DeliverablesPage() {
         confirmLabel="Delete" destructive busy={del.busy}
         onConfirm={confirmDelete} onClose={() => setDel({ open: false, deliverable: null, busy: false })}
       />
+      {depsFor && (
+        <DependenciesDialog open deliverable={depsFor} onClose={() => setDepsFor(null)} />
+      )}
     </Box>
   );
 }

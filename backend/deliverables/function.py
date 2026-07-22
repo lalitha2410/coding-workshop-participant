@@ -21,6 +21,13 @@ from deliverables_repository import (
     update_deliverable,
     delete_deliverable,
     project_exists,
+    deliverable_exists,
+    add_dependency,
+    remove_dependency,
+    get_dependencies,
+    get_dependents,
+    path_exists,
+    DuplicateDependencyError,
 )
 from validation import validate_create, validate_update
 from pagination import parse_pagination, PaginationError
@@ -76,16 +83,20 @@ def _get_method(event):
     return (method or "GET").upper()
 
 
-def _get_path_id(event):
-    """Extract the {id} path segment from pathParameters or the raw path."""
-    path_params = event.get("pathParameters") or {}
-    if path_params.get("id"):
-        return path_params["id"]
+def _parse_path(event):
+    """
+    Return the path segments after 'deliverables'. Examples:
+      /deliverables                       -> []
+      /deliverables/5                     -> ['5']
+      /deliverables/5/dependencies        -> ['5', 'dependencies']
+      /deliverables/5/dependencies/3      -> ['5', 'dependencies', '3']
+    """
     path = event.get("path") or event.get("rawPath") or ""
     segments = [s for s in path.split("/") if s]
-    if segments and segments[-1] != "deliverables":
-        return segments[-1]
-    return None
+    if "deliverables" in segments:
+        idx = segments.index("deliverables")
+        return segments[idx + 1:]
+    return segments
 
 
 def _parse_id(raw):
@@ -179,6 +190,60 @@ def _handle_delete(deliverable_id):
 
 
 # ---------------------------------------------------------------------------
+# Dependency route handlers  (/deliverables/{id}/dependencies[/{depends_on_id}])
+# ---------------------------------------------------------------------------
+
+def _handle_get_dependencies(deliverable_id):
+    did = _parse_id(deliverable_id)
+    if did is None or not deliverable_exists(did):
+        return _error(404, f"Deliverable {deliverable_id} not found.")
+    return _response(200, {
+        "deliverable_id": did,
+        "depends_on": get_dependencies(did),   # what this deliverable depends on
+        "dependents": get_dependents(did),     # what depends on this deliverable
+    })
+
+
+def _handle_add_dependency(deliverable_id, event):
+    did = _parse_id(deliverable_id)
+    if did is None or not deliverable_exists(did):
+        return _error(404, f"Deliverable {deliverable_id} not found.")
+
+    data = _get_body(event)
+    dep_on = data.get("depends_on_id")
+    if not isinstance(dep_on, int) or isinstance(dep_on, bool):
+        try:
+            dep_on = int(dep_on)
+        except (TypeError, ValueError):
+            return _error(400, "`depends_on_id` is required and must be an integer.")
+
+    if dep_on == did:
+        return _error(400, "A deliverable cannot depend on itself.")
+    if not deliverable_exists(dep_on):
+        return _error(400, f"Referenced deliverable {dep_on} does not exist.")
+    # Cycle check: adding did -> dep_on is a cycle if dep_on already reaches did.
+    if path_exists(dep_on, did):
+        return _error(400, f"Adding this dependency would create a cycle (deliverable {dep_on} already depends on {did}).")
+
+    try:
+        edge = add_dependency(did, dep_on)
+    except DuplicateDependencyError:
+        return _error(400, f"Deliverable {did} already depends on {dep_on}.")
+    return _response(201, edge)
+
+
+def _handle_remove_dependency(deliverable_id, depends_on_id):
+    did = _parse_id(deliverable_id)
+    dep_on = _parse_id(depends_on_id)
+    if did is None or dep_on is None:
+        return _error(404, "Dependency not found.")
+    removed = remove_dependency(did, dep_on)
+    if removed is None:
+        return _error(404, f"Deliverable {did} does not depend on {dep_on}.")
+    return _no_content()
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -189,10 +254,35 @@ def handler(event=None, context=None):
 
     try:
         method = _get_method(event)
-        # 401 if unauthenticated / user deleted; 403 if role unknown or lacks permission.
-        auth.authorize_request(event, method, user_exists=auth.db_user_exists)
-        deliverable_id = _get_path_id(event)
+        segments = _parse_path(event)
+        is_dependency = len(segments) >= 2 and segments[1] == "dependencies"
 
+        # Authenticate first (401 for missing/invalid/expired/deleted-user; 403 for
+        # unknown role), then enforce the permission this specific route needs.
+        principal = auth.authenticate(event, user_exists=auth.db_user_exists)
+        if is_dependency:
+            # Reads are open to any role; adding/removing a dependency is Contributor+
+            # (mapped to the create permission — NOT delete, so remove isn't Manager-only).
+            if method in ("POST", "DELETE"):
+                auth.require_permission(principal, auth.CREATE)
+        else:
+            action = auth.METHOD_PERMISSIONS.get(method)
+            if action is not None:
+                auth.require_permission(principal, action)
+
+        deliverable_id = segments[0] if segments else None
+
+        # --- Dependency sub-resource routes ---
+        if is_dependency:
+            if method == "GET" and len(segments) == 2:
+                return _handle_get_dependencies(deliverable_id)
+            if method == "POST" and len(segments) == 2:
+                return _handle_add_dependency(deliverable_id, event)
+            if method == "DELETE" and len(segments) == 3:
+                return _handle_remove_dependency(deliverable_id, segments[2])
+            return _error(405, f"Method {method} not allowed on this path.")
+
+        # --- Deliverable CRUD routes ---
         if method == "GET":
             return _handle_get(deliverable_id) if deliverable_id else _handle_list(event)
         if method == "POST":

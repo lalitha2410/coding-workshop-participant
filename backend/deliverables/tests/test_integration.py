@@ -11,8 +11,11 @@ Run against the local dev database with the schema loaded:
     IS_LOCAL=true pytest backend/deliverables/tests/test_integration.py
 """
 
+import json
+
 import pytest
 
+import function
 import postgres_service
 from deliverables_repository import (
     list_deliverables,
@@ -21,6 +24,12 @@ from deliverables_repository import (
     update_deliverable,
     delete_deliverable,
     project_exists,
+    add_dependency,
+    remove_dependency,
+    get_dependencies,
+    get_dependents,
+    path_exists,
+    DuplicateDependencyError,
 )
 
 
@@ -154,3 +163,112 @@ def test_create_with_missing_project_raises(parent_project):
         create_deliverable({"project_id": 2_000_000_000, "name": "Orphan"})
     # Reset the pooled connection soured by the failed transaction.
     postgres_service.PG_CONN = None
+
+
+# ---------------------------------------------------------------------------
+# Dependencies (deliverable_dependencies) — real DB
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def graph():
+    """A project with three deliverables A, B, C. Teardown cascades everything."""
+    proj = postgres_service.execute(
+        "INSERT INTO projects (name, status) VALUES (%s, 'planning') RETURNING id",
+        ("Dep IT Project",), fetch="one",
+    )
+    pid = proj["id"]
+    ids = {"pid": pid}
+    for key in ("a", "b", "c"):
+        ids[key] = create_deliverable({"project_id": pid, "name": f"Dep-{key.upper()}"})["id"]
+    yield ids
+    postgres_service.execute("DELETE FROM projects WHERE id = %s", (pid,))
+
+
+def test_dep_add_read_and_sides(graph):
+    add_dependency(graph["a"], graph["b"])  # A depends on B
+    assert [d["id"] for d in get_dependencies(graph["a"])] == [graph["b"]]
+    assert [d["id"] for d in get_dependents(graph["b"])] == [graph["a"]]
+    assert get_dependencies(graph["b"]) == []   # B depends on nothing
+    assert get_dependents(graph["a"]) == []     # nothing depends on A
+
+
+def test_dep_path_exists_transitive(graph):
+    add_dependency(graph["a"], graph["b"])  # A -> B
+    add_dependency(graph["b"], graph["c"])  # B -> C
+    assert path_exists(graph["a"], graph["b"]) is True
+    assert path_exists(graph["a"], graph["c"]) is True   # transitive A -> B -> C
+    assert path_exists(graph["c"], graph["a"]) is False
+    assert path_exists(graph["b"], graph["a"]) is False
+
+
+def test_dep_duplicate_raises(graph):
+    add_dependency(graph["a"], graph["b"])
+    with pytest.raises(DuplicateDependencyError):
+        add_dependency(graph["a"], graph["b"])
+    postgres_service.PG_CONN = None  # reset after the recovered constraint error
+
+
+def _post_dep(did, dep_on):
+    # No headers -> the conftest autouse fixture injects a valid Admin token.
+    return function.handler({
+        "httpMethod": "POST", "path": f"/deliverables/{did}/dependencies",
+        "body": json.dumps({"depends_on_id": dep_on}),
+    })
+
+
+def test_dep_full_flow_and_cycles_via_handler(graph):
+    a, b, c = graph["a"], graph["b"], graph["c"]
+
+    assert _post_dep(a, b)["statusCode"] == 201   # A -> B
+    assert _post_dep(b, c)["statusCode"] == 201   # B -> C
+
+    # Direct cycle: B already depends on C, so C -> B closes a 2-cycle.
+    r = _post_dep(c, b)
+    assert r["statusCode"] == 400 and "cycle" in json.loads(r["body"])["error"].lower()
+
+    # Transitive cycle: A -> B -> C already exists, so C -> A closes A->B->C->A.
+    r = _post_dep(c, a)
+    assert r["statusCode"] == 400 and "cycle" in json.loads(r["body"])["error"].lower()
+
+    # Self-dependency.
+    r = _post_dep(a, a)
+    assert r["statusCode"] == 400 and "itself" in json.loads(r["body"])["error"]
+
+    # Duplicate.
+    assert _post_dep(a, b)["statusCode"] == 400
+
+    # GET view reflects the edges.
+    view = json.loads(function.handler({"httpMethod": "GET", "path": f"/deliverables/{a}/dependencies"})["body"])
+    assert [d["id"] for d in view["depends_on"]] == [b]
+
+    # Remove A -> B via the handler.
+    r = function.handler({"httpMethod": "DELETE", "path": f"/deliverables/{a}/dependencies/{b}"})
+    assert r["statusCode"] == 204
+    assert get_dependencies(a) == []
+
+
+def test_reads_and_traversal_terminate_on_preexisting_cycle(graph):
+    """
+    Even if the table already contains a cycle (inserted out-of-band, bypassing
+    the handler's cycle guard), reads and the recursive traversal must terminate
+    — the visited-path + depth guard prevents an infinite loop.
+    """
+    a, b, c = graph["a"], graph["b"], graph["c"]
+    # Insert a 3-cycle directly: A -> B -> C -> A.
+    for did, dep_on in ((a, b), (b, c), (c, a)):
+        postgres_service.execute(
+            "INSERT INTO deliverable_dependencies (deliverable_id, depends_on_id) VALUES (%s, %s)",
+            (did, dep_on),
+        )
+
+    # Read endpoint returns (does not hang) despite the cycle.
+    resp = function.handler({"httpMethod": "GET", "path": f"/deliverables/{a}/dependencies"})
+    assert resp["statusCode"] == 200
+    view = json.loads(resp["body"])
+    assert {d["id"] for d in view["depends_on"]} == {b}   # A -> B (direct)
+    assert {d["id"] for d in view["dependents"]} == {c}   # C -> A (direct)
+
+    # Guarded recursive traversal terminates and reports transitive reachability.
+    assert path_exists(a, b) is True
+    assert path_exists(a, c) is True    # A -> B -> C, terminates through the cycle
+    assert path_exists(b, a) is True    # B -> C -> A
