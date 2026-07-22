@@ -1,0 +1,3 @@
+# Test-only dependencies (not bundled into the deployed Lambda).
+-r requirements.txt
+pytest==9.1.1
