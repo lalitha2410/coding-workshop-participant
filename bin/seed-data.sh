@@ -25,7 +25,7 @@ export PGPASSWORD="${POSTGRES_PASS:-postgres123}"
 PSQL=(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -q)
 
 echo "======================================"
-echo "Meridian — seeding demo data"
+echo "LoadBalance — seeding demo data"
 echo "  target: $PGUSER@$PGHOST:$PGPORT/$PGDATABASE"
 echo "======================================"
 

@@ -69,5 +69,10 @@ export default defineConfig(({ mode }) => {
       port: 3000,
       proxy: buildProxy(env),
     },
+    // Vitest — pure-logic unit tests run in a plain Node environment.
+    test: {
+      environment: 'node',
+      include: ['src/**/*.test.{js,jsx}'],
+    },
   };
 });

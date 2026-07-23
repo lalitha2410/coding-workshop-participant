@@ -4,6 +4,21 @@ import { FormDialog } from '../../components/form/FormDialog';
 import { FormField } from '../../components/common/FormField';
 import { createProject, updateProject, PROJECT_STATUSES, DEPARTMENTS } from '../../api/projects';
 import { useToast } from '../../components/common/Toast';
+import { entityMsg, describeUpdate } from '../../utils/messages';
+
+const UPDATE_CONFIG = {
+  entity: 'project', possessive: 'its', nameKey: 'name',
+  fields: [
+    { key: 'status', label: 'status' },
+    { key: 'department', label: 'department' },
+    { key: 'description', label: 'description' },
+    { key: 'start_date', label: 'start date' },
+    { key: 'end_date', label: 'end date' },
+    { key: 'deadline', label: 'deadline' },
+    { key: 'budget_planned', label: 'planned budget' },
+    { key: 'budget_consumed', label: 'consumed budget' },
+  ],
+};
 
 const STATUS_LABELS = {
   planning: 'Planning', active: 'Active', on_hold: 'On hold', completed: 'Completed', cancelled: 'Cancelled',
@@ -48,9 +63,14 @@ export function ProjectFormDialog({ open, project, onClose, onSaved }) {
       budget_consumed: form.budget_consumed === '' ? null : Number(form.budget_consumed),
     };
     try {
-      if (editing) await updateProject(project.id, payload);
-      else await createProject(payload);
-      toast.success(editing ? 'Project updated' : 'Project created');
+      if (editing) {
+        const desc = describeUpdate(project, payload, UPDATE_CONFIG);
+        if (desc.changed) await updateProject(project.id, payload);
+        (desc.changed ? toast.success : toast.info)(desc.message);
+      } else {
+        await createProject(payload);
+        toast.success(entityMsg('Project', payload.name, 'created'));
+      }
       onSaved();
     } catch (err) {
       setError(err?.details?.length ? err.details.join(' ') : err?.message || 'Could not save project.');

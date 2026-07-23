@@ -251,3 +251,186 @@ def test_unexpected_error_returns_500(repo):
              "body": json.dumps({"username": "ada", "password": "password123"})}
     resp = function.handler(event)
     assert resp["statusCode"] == 500
+
+
+# ---------------------------------------------------------------------------
+# Admin user management  (/auth/users)
+# ---------------------------------------------------------------------------
+
+def _hdr(role, sub="1"):
+    token = auth.create_token({"sub": sub, "username": "u", "role": role})
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def bypass_user_check(monkeypatch):
+    # The admin routes verify the token's user still exists (DB); bypass in unit tests.
+    monkeypatch.setattr(function.auth, "db_user_exists", lambda uid: True)
+
+
+A_USER = {"id": 5, "username": "sam", "email": "sam@acme.test", "role": "Manager",
+          "created_at": datetime(2026, 1, 1, 12, 0, 0)}
+
+
+# ---- list ----
+
+def test_list_users_admin_200(repo, bypass_user_check):
+    repo.set("list_users", {"items": [A_USER], "total": 1, "limit": 50, "offset": 0})
+    resp = function.handler({"httpMethod": "GET", "path": "/auth/users", "headers": _hdr("Admin")})
+    assert resp["statusCode"] == 200
+    body = _body(resp)
+    assert body["items"][0]["username"] == "sam" and body["total"] == 1
+    assert repo.calls["list_users"]["kwargs"] == {"search": None, "limit": 50, "offset": 0}
+
+
+def test_list_users_search_passthrough(repo, bypass_user_check):
+    repo.set("list_users", {"items": [], "total": 0, "limit": 50, "offset": 0})
+    function.handler({"httpMethod": "GET", "path": "/auth/users", "headers": _hdr("Admin"),
+                      "queryStringParameters": {"search": "sam"}})
+    assert repo.calls["list_users"]["kwargs"]["search"] == "sam"
+
+
+def test_list_users_viewer_403(repo, bypass_user_check):
+    resp = function.handler({"httpMethod": "GET", "path": "/auth/users", "headers": _hdr("Viewer")})
+    assert resp["statusCode"] == 403
+
+
+def test_list_users_no_token_401(repo):
+    resp = function.handler({"httpMethod": "GET", "path": "/auth/users"})
+    assert resp["statusCode"] == 401
+
+
+def test_list_users_bad_pagination_400(repo, bypass_user_check):
+    resp = function.handler({"httpMethod": "GET", "path": "/auth/users", "headers": _hdr("Admin"),
+                             "queryStringParameters": {"limit": "abc"}})
+    assert resp["statusCode"] == 400
+
+
+# ---- change role ----
+
+def test_change_role_200(repo, bypass_user_check):
+    repo.set("get_role_by_name", {"id": 2, "name": "Manager"})
+    repo.set("update_user_role", {**A_USER, "role": "Manager"})
+    resp = function.handler({"httpMethod": "PUT", "path": "/auth/users/5/role", "headers": _hdr("Admin"),
+                             "body": json.dumps({"role": "Manager"})})
+    assert resp["statusCode"] == 200
+    assert _body(resp)["role"] == "Manager"
+
+
+def test_change_role_invalid_role_400(repo, bypass_user_check):
+    resp = function.handler({"httpMethod": "PUT", "path": "/auth/users/5/role", "headers": _hdr("Admin"),
+                             "body": json.dumps({"role": "Wizard"})})
+    assert resp["statusCode"] == 400
+    assert "must be one of" in _body(resp)["error"]
+
+
+def test_change_role_self_demotion_400(repo, bypass_user_check):
+    # Admin (sub=5) trying to change user 5 (themselves) to Viewer -> blocked.
+    resp = function.handler({"httpMethod": "PUT", "path": "/auth/users/5/role", "headers": _hdr("Admin", sub="5"),
+                             "body": json.dumps({"role": "Viewer"})})
+    assert resp["statusCode"] == 400
+    assert "own role" in _body(resp)["error"]
+
+
+def test_change_role_self_to_admin_ok(repo, bypass_user_check):
+    # Setting your own role to Admin (a no-op) is allowed.
+    repo.set("get_role_by_name", {"id": 1, "name": "Admin"})
+    repo.set("update_user_role", {**A_USER, "id": 5, "role": "Admin"})
+    resp = function.handler({"httpMethod": "PUT", "path": "/auth/users/5/role", "headers": _hdr("Admin", sub="5"),
+                             "body": json.dumps({"role": "Admin"})})
+    assert resp["statusCode"] == 200
+
+
+def test_change_role_not_found_404(repo, bypass_user_check):
+    repo.set("get_role_by_name", {"id": 2, "name": "Manager"})
+    repo.set("update_user_role", None)
+    resp = function.handler({"httpMethod": "PUT", "path": "/auth/users/999/role", "headers": _hdr("Admin"),
+                             "body": json.dumps({"role": "Manager"})})
+    assert resp["statusCode"] == 404
+
+
+def test_change_role_viewer_403(repo, bypass_user_check):
+    resp = function.handler({"httpMethod": "PUT", "path": "/auth/users/5/role", "headers": _hdr("Viewer"),
+                             "body": json.dumps({"role": "Manager"})})
+    assert resp["statusCode"] == 403
+
+
+# ---- delete ----
+
+def test_delete_user_204(repo, bypass_user_check):
+    repo.set("delete_user", {"id": 5})
+    resp = function.handler({"httpMethod": "DELETE", "path": "/auth/users/5", "headers": _hdr("Admin")})
+    assert resp["statusCode"] == 204 and resp["body"] == ""
+
+
+def test_delete_self_400(repo, bypass_user_check):
+    resp = function.handler({"httpMethod": "DELETE", "path": "/auth/users/5", "headers": _hdr("Admin", sub="5")})
+    assert resp["statusCode"] == 400
+    assert "own account" in _body(resp)["error"]
+
+
+def test_delete_user_not_found_404(repo, bypass_user_check):
+    repo.set("delete_user", None)
+    resp = function.handler({"httpMethod": "DELETE", "path": "/auth/users/999", "headers": _hdr("Admin")})
+    assert resp["statusCode"] == 404
+
+
+def test_delete_user_manager_403(repo, bypass_user_check):
+    resp = function.handler({"httpMethod": "DELETE", "path": "/auth/users/5", "headers": _hdr("Manager")})
+    assert resp["statusCode"] == 403
+
+
+def test_users_wrong_method_405(repo, bypass_user_check):
+    resp = function.handler({"httpMethod": "POST", "path": "/auth/users", "headers": _hdr("Admin")})
+    assert resp["statusCode"] == 405
+
+
+# ---- update details (username/email) ----
+
+def test_update_user_details_200(repo, bypass_user_check):
+    repo.set("update_user_details", {**A_USER, "username": "sam2", "email": "sam2@acme.test"})
+    resp = function.handler({"httpMethod": "PUT", "path": "/auth/users/5", "headers": _hdr("Admin"),
+                             "body": json.dumps({"username": "sam2", "email": "sam2@acme.test"})})
+    assert resp["statusCode"] == 200
+    body = _body(resp)
+    assert body["username"] == "sam2" and body["email"] == "sam2@acme.test"
+    assert repo.calls["update_user_details"]["kwargs"] == {"username": "sam2", "email": "sam2@acme.test"}
+
+
+def test_update_user_duplicate_400(repo, bypass_user_check):
+    repo.set("update_user_details", DuplicateUserError("sam2"))
+    resp = function.handler({"httpMethod": "PUT", "path": "/auth/users/5", "headers": _hdr("Admin"),
+                             "body": json.dumps({"username": "taken"})})
+    assert resp["statusCode"] == 400
+    assert "already in use" in _body(resp)["error"]
+
+
+def test_update_user_invalid_email_400(repo, bypass_user_check):
+    resp = function.handler({"httpMethod": "PUT", "path": "/auth/users/5", "headers": _hdr("Admin"),
+                             "body": json.dumps({"email": "not-an-email"})})
+    assert resp["statusCode"] == 400
+    assert any("email" in d for d in _body(resp)["details"])
+
+
+def test_update_user_empty_username_400(repo, bypass_user_check):
+    resp = function.handler({"httpMethod": "PUT", "path": "/auth/users/5", "headers": _hdr("Admin"),
+                             "body": json.dumps({"username": "   "})})
+    assert resp["statusCode"] == 400
+
+
+def test_update_user_not_found_404(repo, bypass_user_check):
+    repo.set("update_user_details", None)
+    resp = function.handler({"httpMethod": "PUT", "path": "/auth/users/999", "headers": _hdr("Admin"),
+                             "body": json.dumps({"username": "ok"})})
+    assert resp["statusCode"] == 404
+
+
+def test_update_user_viewer_403(repo, bypass_user_check):
+    resp = function.handler({"httpMethod": "PUT", "path": "/auth/users/5", "headers": _hdr("Viewer"),
+                             "body": json.dumps({"username": "ok"})})
+    assert resp["statusCode"] == 403
+
+
+def test_update_user_no_token_401(repo):
+    resp = function.handler({"httpMethod": "PUT", "path": "/auth/users/5", "body": json.dumps({"username": "ok"})})
+    assert resp["statusCode"] == 401

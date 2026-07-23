@@ -16,12 +16,15 @@ import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { DeliverableFormDialog } from './DeliverableFormDialog';
 import { usePaginatedList } from '../../hooks/usePaginatedList';
 import { useAsync } from '../../hooks/useAsync';
+import { ExportButton } from '../../components/data/ExportButton';
+import { fetchAllRows } from '../../api/fetchAll';
 import { listDeliverables, deleteDeliverable, DELIVERABLE_STATUSES } from '../../api/deliverables';
 import { listProjects } from '../../api/projects';
 import { fmtDate } from '../../utils/format';
 import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/roles';
 import { useToast } from '../../components/common/Toast';
+import { entityMsg } from '../../utils/messages';
 
 export default function DeliverablesPage() {
   const { role } = useAuth();
@@ -30,6 +33,16 @@ export default function DeliverablesPage() {
   const { data: projectsData } = useAsync(() => listProjects({ limit: 200 }), []);
   const projects = projectsData?.items || [];
   const projectName = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p.name])), [projects]);
+
+  const exportColumns = useMemo(() => [
+    { header: 'ID', value: 'id' },
+    { header: 'Project', value: (d) => projectName[d.project_id] || `#${d.project_id}` },
+    { header: 'Name', value: 'name' },
+    { header: 'Description', value: 'description' },
+    { header: 'Status', value: 'status' },
+    { header: 'Completion %', value: 'completion_pct' },
+    { header: 'Due Date', value: 'due_date' },
+  ], [projectName]);
 
   const [form, setForm] = useState({ open: false, deliverable: null });
   const [depsFor, setDepsFor] = useState(null);
@@ -45,7 +58,7 @@ export default function DeliverablesPage() {
     setDel((d) => ({ ...d, busy: true }));
     try {
       await deleteDeliverable(del.deliverable.id);
-      toast.success('Deliverable deleted');
+      toast.success(entityMsg('Deliverable', del.deliverable.name, 'deleted'));
       setDel({ open: false, deliverable: null, busy: false });
       list.refetch();
     } catch (err) {
@@ -59,7 +72,16 @@ export default function DeliverablesPage() {
       <PageHeader
         title="Deliverables"
         subtitle="Milestones and their status across projects."
-        actions={canCreate && <Button variant="contained" startIcon={<AddIcon />} disabled={projects.length === 0} onClick={() => setForm({ open: true, deliverable: null })}>New deliverable</Button>}
+        actions={
+          <>
+            <ExportButton
+              filenamePrefix="deliverables"
+              columns={exportColumns}
+              fetchRows={() => fetchAllRows(listDeliverables, { project_id: list.filters.project_id, status: list.filters.status })}
+            />
+            {canCreate && <Button variant="contained" startIcon={<AddIcon />} disabled={projects.length === 0} onClick={() => setForm({ open: true, deliverable: null })}>New deliverable</Button>}
+          </>
+        }
       />
 
       <Box sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap' }}>

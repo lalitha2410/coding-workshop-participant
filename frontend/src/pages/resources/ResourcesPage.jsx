@@ -13,11 +13,22 @@ import { PaginationBar } from '../../components/data/PaginationBar';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { ResourceFormDialog } from './ResourceFormDialog';
 import { usePaginatedList } from '../../hooks/usePaginatedList';
+import { ExportButton } from '../../components/data/ExportButton';
+import { fetchAllRows } from '../../api/fetchAll';
 import { listResources, deleteResource } from '../../api/resources';
 import { fmtDate } from '../../utils/format';
 import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/roles';
 import { useToast } from '../../components/common/Toast';
+import { entityMsg } from '../../utils/messages';
+
+const EXPORT_COLUMNS = [
+  { header: 'ID', value: 'id' },
+  { header: 'Name', value: 'name' },
+  { header: 'Email', value: 'email' },
+  { header: 'Title', value: 'title' },
+  { header: 'Created At', value: 'created_at' },
+];
 
 function initials(name = '') {
   const parts = name.trim().split(/\s+/);
@@ -41,7 +52,7 @@ export default function ResourcesPage() {
     setDel((d) => ({ ...d, busy: true }));
     try {
       await deleteResource(del.resource.id);
-      toast.success('Resource deleted');
+      toast.success(entityMsg('Resource', del.resource.name, 'deleted'));
       setDel({ open: false, resource: null, busy: false });
       list.refetch();
     } catch (err) {
@@ -55,7 +66,16 @@ export default function ResourcesPage() {
       <PageHeader
         title="Resources"
         subtitle="People and their skills across the organization."
-        actions={canCreate && <Button variant="contained" startIcon={<AddIcon />} onClick={() => setForm({ open: true, resource: null })}>New resource</Button>}
+        actions={
+          <>
+            <ExportButton
+              filenamePrefix="resources"
+              columns={EXPORT_COLUMNS}
+              fetchRows={() => fetchAllRows(listResources, { search: list.filters.search })}
+            />
+            {canCreate && <Button variant="contained" startIcon={<AddIcon />} onClick={() => setForm({ open: true, resource: null })}>New resource</Button>}
+          </>
+        }
       />
 
       <Box sx={{ mb: 2, maxWidth: 340 }}>

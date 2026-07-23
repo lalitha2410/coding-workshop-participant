@@ -1,5 +1,5 @@
 /**
- * Meridian design tokens.
+ * LoadBalance design tokens.
  *
  * Single source of truth for the "calm operations desk" design system. Every
  * component reads semantic tokens from the MUI theme (theme.palette.*) — never

@@ -42,7 +42,7 @@ export default function LoginPage() {
 
         <Typography variant="h1" sx={{ fontSize: '1.5rem', mb: 0.5 }}>Welcome back</Typography>
         <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3.5 }}>
-          Sign in to your Meridian workspace.
+          Sign in to your LoadBalance workspace.
         </Typography>
 
         {!hasBackendConfig() && (

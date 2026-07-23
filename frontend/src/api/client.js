@@ -1,5 +1,5 @@
 /**
- * Thin fetch wrapper for the Meridian backend services.
+ * Thin fetch wrapper for the LoadBalance backend services.
  *
  * Calls are made SAME-ORIGIN through the /api/<service> prefix. In dev, the Vite
  * proxy (see vite.config.js) forwards those to the LocalStack Lambda URLs from

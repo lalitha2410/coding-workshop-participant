@@ -1,6 +1,6 @@
-# Meridian API Reference
+# LoadBalance API Reference
 
-Complete reference for the ACME **Meridian** backend — five independent Lambda
+Complete reference for the ACME **LoadBalance** backend — five independent Lambda
 services: **auth**, **projects**, **deliverables**, **resources**, **allocations**.
 
 All example requests and responses in this document were **captured from the

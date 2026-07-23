@@ -1,6 +1,6 @@
 /**
  * Labeled input: label sits above the field (dense-form friendly), matching the
- * Meridian form direction. Thin wrapper over MUI TextField.
+ * LoadBalance form direction. Thin wrapper over MUI TextField.
  */
 
 import { Box, Typography, TextField } from '@mui/material';

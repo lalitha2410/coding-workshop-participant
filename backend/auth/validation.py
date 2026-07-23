@@ -56,5 +56,25 @@ def validate_login(data):
     return errors
 
 
+def validate_user_update(data):
+    """
+    Validate an admin's user-details update (username/email only). Fields are
+    optional (partial update), but must be well-formed when present. Returns a
+    list of error strings ([] if valid).
+    """
+    if not isinstance(data, dict):
+        return ["Request body must be a JSON object."]
+    errors = []
+    if "username" in data and not _is_non_empty_string(data.get("username")):
+        errors.append("`username` cannot be empty.")
+    if "email" in data:
+        email = data.get("email")
+        if not _is_non_empty_string(email):
+            errors.append("`email` cannot be empty.")
+        elif not _EMAIL_RE.match(email):
+            errors.append("`email` must be a valid email address.")
+    return errors
+
+
 def _is_non_empty_string(value):
     return isinstance(value, str) and value.strip() != ""

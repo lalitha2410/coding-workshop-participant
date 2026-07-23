@@ -14,7 +14,7 @@ import ProjectsPage from './pages/projects/ProjectsPage';
 import DeliverablesPage from './pages/deliverables/DeliverablesPage';
 import ResourcesPage from './pages/resources/ResourcesPage';
 import AllocationsPage from './pages/allocations/AllocationsPage';
-import PlaceholderPage from './pages/PlaceholderPage';
+import UsersPage from './pages/UsersPage';
 import { NotPermittedPage, NotFoundPage } from './pages/StatusPages';
 
 export default function App() {
@@ -33,7 +33,7 @@ export default function App() {
           path="users"
           element={
             <ProtectedRoute permission="manage_users">
-              <PlaceholderPage title="Users" subtitle="Manage accounts and roles (Admin only)." />
+              <UsersPage />
             </ProtectedRoute>
           }
         />

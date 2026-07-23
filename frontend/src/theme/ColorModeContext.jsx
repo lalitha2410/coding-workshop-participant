@@ -1,7 +1,7 @@
 /**
  * Light/dark color-mode provider.
  *
- * Persists the chosen mode to localStorage (default: light), builds the Meridian
+ * Persists the chosen mode to localStorage (default: light), builds the LoadBalance
  * theme for that mode, and exposes a toggle. Because components read semantic
  * tokens from the theme, flipping mode is a pure palette swap.
  */

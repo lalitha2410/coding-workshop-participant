@@ -1,5 +1,5 @@
 -- ============================================================
--- Meridian — realistic demo seed data (domain tables only)
+-- LoadBalance — realistic demo seed data (domain tables only)
 -- ============================================================
 -- Idempotent / re-runnable: resets the four domain tables to a known state and
 -- reseeds. users & roles are NOT touched here (see bin/seed-data.sh for demo

@@ -20,6 +20,7 @@ import { StatusChip } from '../../components/data/StatusChip';
 import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/roles';
 import { useToast } from '../../components/common/Toast';
+import { dependencyMsg } from '../../utils/messages';
 
 function DepRow({ item, onRemove, canManage }) {
   return (
@@ -57,11 +58,12 @@ export function DependenciesDialog({ open, deliverable, onClose }) {
 
   async function add() {
     if (!pick) return;
+    const name = candidates.find((c) => c.id === Number(pick))?.name || `#${pick}`;
     setError(''); setBusy(true);
     try {
       await addDependency(deliverable.id, Number(pick));
       setPick('');
-      toast.success('Dependency added');
+      toast.success(dependencyMsg(name, 'added'));
       deps.refetch();
     } catch (err) {
       // Friendly cycle/duplicate/reference messages come straight from the API.
@@ -70,10 +72,11 @@ export function DependenciesDialog({ open, deliverable, onClose }) {
   }
 
   async function remove(depId) {
+    const name = dependsOn.find((d) => d.id === depId)?.name || `#${depId}`;
     setError(''); setBusy(true);
     try {
       await removeDependency(deliverable.id, depId);
-      toast.success('Dependency removed');
+      toast.success(dependencyMsg(name, 'removed'));
       deps.refetch();
     } catch (err) {
       setError(err?.message || 'Could not remove dependency.');

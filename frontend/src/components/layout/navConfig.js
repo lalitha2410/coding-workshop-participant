@@ -43,5 +43,5 @@ export function titleForPath(pathname) {
   const hit = NAV.flatMap((s) => s.items)
     .filter((i) => i.to !== '/' && pathname.startsWith(i.to))
     .sort((a, b) => b.to.length - a.to.length)[0];
-  return hit?.label ?? 'Meridian';
+  return hit?.label ?? 'LoadBalance';
 }

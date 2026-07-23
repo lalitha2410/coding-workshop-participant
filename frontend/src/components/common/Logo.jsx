@@ -1,6 +1,6 @@
 /**
- * Meridian brandmark: a slate-blue tile with a meridian arc + node, paired with
- * the wordmark. `compact` renders the mark only (for the collapsed rail / mobile).
+ * LoadBalance brandmark: a slate-blue tile with an abstract arc + node, paired
+ * with the wordmark. `compact` renders the mark only (collapsed rail / mobile).
  */
 
 import { Box, Typography } from '@mui/material';
@@ -34,7 +34,7 @@ export function Logo({ compact = false, size = 30 }) {
       {!compact && (
         <Box sx={{ lineHeight: 1, minWidth: 0 }}>
           <Typography sx={{ fontWeight: 700, fontSize: '1rem', letterSpacing: '-0.02em', color: 'text.primary' }}>
-            Meridian
+            LoadBalance
           </Typography>
           <Typography sx={{ fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.14em', color: 'text.disabled', textTransform: 'uppercase' }}>
             ACME

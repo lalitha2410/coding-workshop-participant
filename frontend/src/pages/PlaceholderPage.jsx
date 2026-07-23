@@ -25,7 +25,7 @@ export default function PlaceholderPage({ title, subtitle }) {
           </Box>
           <Typography variant="h3" sx={{ mb: 0.5 }}>{title} coming next</Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary', maxWidth: 420, mx: 'auto' }}>
-            This screen will be built on the Meridian design system in the next stage,
+            This screen will be built on the LoadBalance design system in the next stage,
             wired to the {title.toLowerCase()} service.
           </Typography>
         </CardContent>

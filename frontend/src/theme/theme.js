@@ -1,5 +1,5 @@
 /**
- * Builds the Meridian MUI theme from design tokens for a given mode.
+ * Builds the LoadBalance MUI theme from design tokens for a given mode.
  *
  * The heavy component overrides here are what make MUI stop looking like MUI:
  * hairline-first surfaces, no ripple, crisp focus rings, tinted low-opacity

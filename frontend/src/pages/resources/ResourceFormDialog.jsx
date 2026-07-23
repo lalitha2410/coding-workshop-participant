@@ -3,6 +3,15 @@ import { FormDialog } from '../../components/form/FormDialog';
 import { FormField } from '../../components/common/FormField';
 import { createResource, updateResource } from '../../api/resources';
 import { useToast } from '../../components/common/Toast';
+import { entityMsg, describeUpdate } from '../../utils/messages';
+
+const UPDATE_CONFIG = {
+  entity: 'resource', possessive: 'their', nameKey: 'name',
+  fields: [
+    { key: 'email', label: 'email' },
+    { key: 'title', label: 'title' },
+  ],
+};
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -23,9 +32,14 @@ export function ResourceFormDialog({ open, resource, onClose, onSaved }) {
     setError(''); setBusy(true);
     const payload = { name: form.name.trim(), email: form.email.trim(), title: form.title || null };
     try {
-      if (editing) await updateResource(resource.id, payload);
-      else await createResource(payload);
-      toast.success(editing ? 'Resource updated' : 'Resource created');
+      if (editing) {
+        const desc = describeUpdate(resource, payload, UPDATE_CONFIG);
+        if (desc.changed) await updateResource(resource.id, payload);
+        (desc.changed ? toast.success : toast.info)(desc.message);
+      } else {
+        await createResource(payload);
+        toast.success(entityMsg('Resource', payload.name, 'created'));
+      }
       onSaved();
     } catch (err) {
       setError(err?.details?.length ? err.details.join(' ') : err?.message || 'Could not save resource.');

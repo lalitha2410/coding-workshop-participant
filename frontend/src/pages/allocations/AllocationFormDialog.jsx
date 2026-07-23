@@ -4,6 +4,15 @@ import { FormDialog } from '../../components/form/FormDialog';
 import { FormField } from '../../components/common/FormField';
 import { createAllocation, updateAllocation } from '../../api/allocations';
 import { useToast } from '../../components/common/Toast';
+import { allocationMsg, describeUpdate } from '../../utils/messages';
+
+const UPDATE_FIELDS = [
+  { key: 'resource_id', label: 'resource' },
+  { key: 'project_id', label: 'project' },
+  { key: 'allocation_pct', label: 'allocation %' },
+  { key: 'start_date', label: 'start date' },
+  { key: 'end_date', label: 'end date' },
+];
 
 export function AllocationFormDialog({ open, allocation, resources, projects, onClose, onSaved }) {
   const editing = Boolean(allocation);
@@ -31,9 +40,21 @@ export function AllocationFormDialog({ open, allocation, resources, projects, on
       end_date: form.end_date || null,
     };
     try {
-      if (editing) await updateAllocation(allocation.id, payload);
-      else await createAllocation(payload);
-      toast.success(editing ? 'Allocation updated' : 'Allocation created');
+      if (editing) {
+        // Identify the allocation by its original resource/project pairing.
+        const origRes = resources.find((r) => r.id === allocation.resource_id)?.name || `#${allocation.resource_id}`;
+        const origProj = projects.find((p) => p.id === allocation.project_id)?.name || `#${allocation.project_id}`;
+        const desc = describeUpdate(allocation, payload, {
+          entity: 'allocation', nameKey: null, subject: `${origRes} on ${origProj}`, fields: UPDATE_FIELDS,
+        });
+        if (desc.changed) await updateAllocation(allocation.id, payload);
+        (desc.changed ? toast.success : toast.info)(desc.message);
+      } else {
+        await createAllocation(payload);
+        const rName = resources.find((r) => r.id === payload.resource_id)?.name || `#${payload.resource_id}`;
+        const pName = projects.find((p) => p.id === payload.project_id)?.name || `#${payload.project_id}`;
+        toast.success(allocationMsg(rName, pName, 'created'));
+      }
       onSaved();
     } catch (err) {
       setError(err?.details?.length ? err.details.join(' ') : err?.message || 'Could not save allocation.');

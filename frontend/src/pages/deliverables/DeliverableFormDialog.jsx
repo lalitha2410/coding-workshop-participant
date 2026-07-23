@@ -4,6 +4,18 @@ import { FormDialog } from '../../components/form/FormDialog';
 import { FormField } from '../../components/common/FormField';
 import { createDeliverable, updateDeliverable, DELIVERABLE_STATUSES } from '../../api/deliverables';
 import { useToast } from '../../components/common/Toast';
+import { entityMsg, describeUpdate } from '../../utils/messages';
+
+const UPDATE_CONFIG = {
+  entity: 'deliverable', possessive: 'its', nameKey: 'name',
+  fields: [
+    { key: 'project_id', label: 'project' },
+    { key: 'status', label: 'status' },
+    { key: 'completion_pct', label: 'completion' },
+    { key: 'description', label: 'description' },
+    { key: 'due_date', label: 'due date' },
+  ],
+};
 
 const STATUS_LABELS = { not_started: 'Not started', in_progress: 'In progress', blocked: 'Blocked', completed: 'Completed' };
 
@@ -35,9 +47,14 @@ export function DeliverableFormDialog({ open, deliverable, projects, defaultProj
       due_date: form.due_date || null,
     };
     try {
-      if (editing) await updateDeliverable(deliverable.id, payload);
-      else await createDeliverable(payload);
-      toast.success(editing ? 'Deliverable updated' : 'Deliverable created');
+      if (editing) {
+        const desc = describeUpdate(deliverable, payload, UPDATE_CONFIG);
+        if (desc.changed) await updateDeliverable(deliverable.id, payload);
+        (desc.changed ? toast.success : toast.info)(desc.message);
+      } else {
+        await createDeliverable(payload);
+        toast.success(entityMsg('Deliverable', payload.name, 'created'));
+      }
       onSaved();
     } catch (err) {
       setError(err?.details?.length ? err.details.join(' ') : err?.message || 'Could not save deliverable.');

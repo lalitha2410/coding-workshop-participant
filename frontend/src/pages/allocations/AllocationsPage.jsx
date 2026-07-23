@@ -14,12 +14,23 @@ import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { AllocationFormDialog } from './AllocationFormDialog';
 import { usePaginatedList } from '../../hooks/usePaginatedList';
 import { useAsync } from '../../hooks/useAsync';
+import { ExportButton } from '../../components/data/ExportButton';
+import { fetchAllRows } from '../../api/fetchAll';
 import { listAllocations, deleteAllocation, overAllocated } from '../../api/allocations';
+
+const OVER_ALLOCATED_COLUMNS = [
+  { header: 'Resource', value: 'resource_name' },
+  { header: 'Email', value: 'email' },
+  { header: 'Total Allocation %', value: 'total_allocation_pct' },
+  { header: 'Project Count', value: 'project_count' },
+  { header: 'Over-allocated', value: (r) => (r.over_allocated ? 'Yes' : 'No') },
+];
 import { listResources } from '../../api/resources';
 import { listProjects } from '../../api/projects';
 import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/roles';
 import { useToast } from '../../components/common/Toast';
+import { allocationMsg } from '../../utils/messages';
 
 export default function AllocationsPage() {
   const { role } = useAuth();
@@ -33,6 +44,15 @@ export default function AllocationsPage() {
   const projects = projData?.items || [];
   const resourceName = useMemo(() => Object.fromEntries(resources.map((r) => [r.id, r.name])), [resources]);
   const projectName = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p.name])), [projects]);
+
+  const exportColumns = useMemo(() => [
+    { header: 'ID', value: 'id' },
+    { header: 'Resource', value: (a) => resourceName[a.resource_id] || `#${a.resource_id}` },
+    { header: 'Project', value: (a) => projectName[a.project_id] || `#${a.project_id}` },
+    { header: 'Allocation %', value: 'allocation_pct' },
+    { header: 'Start Date', value: 'start_date' },
+    { header: 'End Date', value: 'end_date' },
+  ], [resourceName, projectName]);
 
   const [form, setForm] = useState({ open: false, allocation: null });
   const [del, setDel] = useState({ open: false, allocation: null, busy: false });
@@ -51,8 +71,13 @@ export default function AllocationsPage() {
   async function confirmDelete() {
     setDel((d) => ({ ...d, busy: true }));
     try {
-      await deleteAllocation(del.allocation.id);
-      toast.success('Allocation deleted');
+      const a = del.allocation;
+      await deleteAllocation(a.id);
+      toast.success(allocationMsg(
+        resourceName[a.resource_id] || `#${a.resource_id}`,
+        projectName[a.project_id] || `#${a.project_id}`,
+        'deleted',
+      ));
       setDel({ open: false, allocation: null, busy: false });
       list.refetch();
       refetchOver();
@@ -67,7 +92,16 @@ export default function AllocationsPage() {
       <PageHeader
         title="Allocations"
         subtitle="Who's assigned where — and who's over-allocated."
-        actions={canCreate && <Button variant="contained" startIcon={<AddIcon />} disabled={!ready} onClick={() => setForm({ open: true, allocation: null })}>New allocation</Button>}
+        actions={
+          <>
+            <ExportButton
+              filenamePrefix="allocations"
+              columns={exportColumns}
+              fetchRows={() => fetchAllRows(listAllocations, { resource_id: list.filters.resource_id, project_id: list.filters.project_id })}
+            />
+            {canCreate && <Button variant="contained" startIcon={<AddIcon />} disabled={!ready} onClick={() => setForm({ open: true, allocation: null })}>New allocation</Button>}
+          </>
+        }
       />
 
       {/* Over-allocation strip (from /allocations/over-allocated) */}
@@ -85,6 +119,15 @@ export default function AllocationsPage() {
                   <Typography className="mono" sx={{ fontSize: '0.8125rem', fontWeight: 700, color: (t) => t.palette.meridian.errorFg }}>{o.total_allocation_pct}%</Typography>
                 </Box>
               ))}
+            </Box>
+            <Box sx={{ ml: 'auto' }}>
+              <ExportButton
+                filenamePrefix="over-allocated"
+                columns={OVER_ALLOCATED_COLUMNS}
+                fetchRows={() => overAllocated()}
+                label="Export report"
+                size="small"
+              />
             </Box>
           </CardContent>
         </Card>

@@ -13,11 +13,27 @@ import { PaginationBar } from '../../components/data/PaginationBar';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { ProjectFormDialog } from './ProjectFormDialog';
 import { usePaginatedList } from '../../hooks/usePaginatedList';
+import { ExportButton } from '../../components/data/ExportButton';
+import { fetchAllRows } from '../../api/fetchAll';
 import { listProjects, deleteProject, PROJECT_STATUSES, DEPARTMENTS } from '../../api/projects';
 import { fmtMoney, fmtDate, isAtRisk } from '../../utils/format';
 import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/roles';
 import { useToast } from '../../components/common/Toast';
+import { entityMsg } from '../../utils/messages';
+
+const EXPORT_COLUMNS = [
+  { header: 'ID', value: 'id' },
+  { header: 'Name', value: 'name' },
+  { header: 'Description', value: 'description' },
+  { header: 'Status', value: 'status' },
+  { header: 'Department', value: 'department' },
+  { header: 'Start Date', value: 'start_date' },
+  { header: 'End Date', value: 'end_date' },
+  { header: 'Deadline', value: 'deadline' },
+  { header: 'Budget Planned', value: 'budget_planned' },
+  { header: 'Budget Consumed', value: 'budget_consumed' },
+];
 
 export default function ProjectsPage() {
   const { role } = useAuth();
@@ -36,7 +52,7 @@ export default function ProjectsPage() {
     setDel((d) => ({ ...d, busy: true }));
     try {
       await deleteProject(del.project.id);
-      toast.success('Project deleted');
+      toast.success(entityMsg('Project', del.project.name, 'deleted'));
       setDel({ open: false, project: null, busy: false });
       list.refetch();
     } catch (err) {
@@ -50,7 +66,16 @@ export default function ProjectsPage() {
       <PageHeader
         title="Projects"
         subtitle="Plan, track, and manage the project portfolio."
-        actions={canCreate && <Button variant="contained" startIcon={<AddIcon />} onClick={() => setForm({ open: true, project: null })}>New project</Button>}
+        actions={
+          <>
+            <ExportButton
+              filenamePrefix="projects"
+              columns={EXPORT_COLUMNS}
+              fetchRows={() => fetchAllRows(listProjects, { status: list.filters.status, department: list.filters.department })}
+            />
+            {canCreate && <Button variant="contained" startIcon={<AddIcon />} onClick={() => setForm({ open: true, project: null })}>New project</Button>}
+          </>
+        }
       />
 
       {/* Filters */}

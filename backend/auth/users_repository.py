@@ -60,3 +60,64 @@ def create_user(username, email, password_hash, role_id):
 def get_role_by_name(name):
     """Return a role row {id, name} by name, or None if it does not exist."""
     return execute("SELECT id, name FROM roles WHERE name = %s", (name,), fetch="one")
+
+
+# ---------------------------------------------------------------------------
+# Admin user management
+# ---------------------------------------------------------------------------
+
+def list_users(search=None, limit=50, offset=0):
+    """
+    Return a page of users (public view) plus pagination info. Optional `search`
+    matches username or email, case-insensitively.
+
+    Shape: {"items": [...], "total": <int>, "limit": <int>, "offset": <int>}.
+    """
+    where, params = "", []
+    if search:
+        where = " WHERE u.username ILIKE %s OR u.email ILIKE %s"
+        like = f"%{search}%"
+        params = [like, like]
+    total = execute(f"SELECT COUNT(*) AS n FROM users u{where}", params, fetch="one")["n"]
+    items = execute(
+        f"SELECT {_PUBLIC} FROM users u JOIN roles r ON u.role_id = r.id{where} ORDER BY u.id LIMIT %s OFFSET %s",
+        params + [limit, offset],
+        fetch="all",
+    )
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+def update_user_role(user_id, role_id):
+    """Set a user's role; return the updated public view, or None if not found."""
+    row = execute("UPDATE users SET role_id = %s WHERE id = %s RETURNING id", (role_id, user_id), fetch="one")
+    if row is None:
+        return None
+    return get_user_by_id(user_id)
+
+
+def update_user_details(user_id, username=None, email=None):
+    """
+    Update a user's username and/or email (partial via COALESCE); return the
+    updated public view, or None if the user does not exist.
+
+    Raises DuplicateUserError if the new username/email collides with another row.
+    """
+    sql = """
+        UPDATE users SET
+            username = COALESCE(%s, username),
+            email    = COALESCE(%s, email)
+        WHERE id = %s
+        RETURNING id
+    """
+    try:
+        row = execute(sql, (username, email, user_id), fetch="one")
+    except psycopg.errors.UniqueViolation:
+        raise DuplicateUserError(username or email)
+    if row is None:
+        return None
+    return get_user_by_id(user_id)
+
+
+def delete_user(user_id):
+    """Delete a user; return {"id": ...} or None if the user did not exist."""
+    return execute("DELETE FROM users WHERE id = %s RETURNING id", (user_id,), fetch="one")

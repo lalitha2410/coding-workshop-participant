@@ -48,18 +48,18 @@ export default function AuthLayout({ children }) {
         <Box sx={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 1.25 }}>
           <LogoMark size={34} />
           <Box>
-            <Typography sx={{ fontWeight: 700, fontSize: '1.05rem', letterSpacing: '-0.02em' }}>Meridian</Typography>
+            <Typography sx={{ fontWeight: 700, fontSize: '1.05rem', letterSpacing: '-0.02em' }}>LoadBalance</Typography>
             <Typography sx={{ fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.16em', opacity: 0.7 }}>ACME</Typography>
           </Box>
         </Box>
 
         <Box sx={{ position: 'relative', maxWidth: 420 }}>
           <Typography sx={{ fontSize: '2rem', fontWeight: 700, lineHeight: 1.15, letterSpacing: '-0.025em', mb: 1.5 }}>
-            See your whole portfolio at a glance.
+            Keep every team in balance.
           </Typography>
           <Typography sx={{ fontSize: '0.95rem', color: 'rgba(255,255,255,0.8)', mb: 4, lineHeight: 1.6 }}>
-            Projects, deliverables, budgets, and people — in one calm operations desk.
-            Spot over-allocation before it bites.
+            See your whole portfolio at a glance — projects, budgets, and people —
+            and catch over-allocated teams before it becomes a problem.
           </Typography>
 
           <Box sx={{ p: 2.5, borderRadius: 3, bgcolor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.14)', backdropFilter: 'blur(4px)' }}>
@@ -73,7 +73,7 @@ export default function AuthLayout({ children }) {
         </Box>
 
         <Typography sx={{ position: 'relative', fontSize: '0.75rem', opacity: 0.6 }}>
-          © {new Date().getFullYear()} ACME · Meridian portfolio operations
+          © {new Date().getFullYear()} ACME · LoadBalance portfolio operations
         </Typography>
       </Box>
 
