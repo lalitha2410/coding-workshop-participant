@@ -9,12 +9,16 @@ import {
   Box, IconButton, Typography, Menu, MenuItem, Avatar, Divider, Chip, Tooltip, ListItemIcon,
 } from '@mui/material';
 import MenuIcon from '@mui/icons-material/MenuRounded';
+import SearchIcon from '@mui/icons-material/SearchRounded';
 import LightModeIcon from '@mui/icons-material/LightModeOutlined';
 import DarkModeIcon from '@mui/icons-material/DarkModeOutlined';
 import LogoutIcon from '@mui/icons-material/LogoutRounded';
 import { useColorMode } from '../../theme/ColorModeContext';
 import { useAuth } from '../../auth/AuthContext';
+import { useCommandPalette } from '../search/CommandPaletteContext';
 import { titleForPath } from './navConfig';
+
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iP(hone|ad)/.test(navigator.platform || navigator.userAgent);
 
 function initials(name = '') {
   const parts = name.trim().split(/[\s._-]+/).filter(Boolean);
@@ -25,6 +29,7 @@ export default function TopBar({ onMenuClick }) {
   const { mode, toggle } = useColorMode();
   const { user, role, logout } = useAuth();
   const { pathname } = useLocation();
+  const { open: openPalette } = useCommandPalette();
   const [anchor, setAnchor] = useState(null);
 
   return (
@@ -45,6 +50,27 @@ export default function TopBar({ onMenuClick }) {
       <Typography variant="h3" sx={{ fontSize: '1.0625rem', flex: 1, minWidth: 0, noWrap: true }} noWrap>
         {titleForPath(pathname)}
       </Typography>
+
+      {/* Search affordance — opens the command palette (Cmd/Ctrl+K). */}
+      <Box
+        role="button" tabIndex={0} onClick={openPalette}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPalette(); } }}
+        aria-label="Search"
+        sx={{
+          display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer', userSelect: 'none',
+          height: 34, px: 1.25, borderRadius: 2, border: '1px solid', borderColor: 'divider',
+          color: 'text.secondary', bgcolor: 'action.hover',
+          '&:hover': { borderColor: 'text.disabled' },
+        }}
+      >
+        <SearchIcon sx={{ fontSize: 18 }} />
+        <Typography sx={{ fontSize: '0.8125rem', display: { xs: 'none', sm: 'block' }, pr: 3 }}>Search</Typography>
+        <Chip
+          label={IS_MAC ? '⌘K' : 'Ctrl K'}
+          size="small"
+          sx={{ height: 20, fontSize: '0.6875rem', fontWeight: 600, display: { xs: 'none', sm: 'flex' }, bgcolor: 'background.paper' }}
+        />
+      </Box>
 
       <Tooltip title={mode === 'light' ? 'Switch to dark' : 'Switch to light'}>
         <IconButton onClick={toggle} aria-label="Toggle color mode">

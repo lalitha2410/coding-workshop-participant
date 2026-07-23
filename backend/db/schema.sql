@@ -96,7 +96,11 @@ CREATE TABLE IF NOT EXISTS activity_log (
     entity_id   INTEGER,
     entity_name VARCHAR(255),
     changes     JSONB,
-    created_at  TIMESTAMP DEFAULT NOW()
+    -- TIMESTAMPTZ (not naive TIMESTAMP): stores an absolute instant and
+    -- serializes with an offset marker, so relative times are correct in any
+    -- timezone. A naive column would record the DB server's local wall-clock
+    -- with no marker, which clients misread as UTC.
+    created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_log(created_at DESC);

@@ -1,6 +1,16 @@
-"""Unit tests for validation.py (pure functions, no database)."""
+"""
+Unit tests — pure logic, no database.
+
+Covers the deliverables validation rules (validate_create / validate_update).
+These exercise the boundary checks — required fields, status enum, completion_pct
+range, date parsing — without touching the handler or the repository.
+"""
+
+import pytest
 
 from validation import validate_create, validate_update, VALID_STATUSES
+
+pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------

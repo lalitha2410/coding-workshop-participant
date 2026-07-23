@@ -1,9 +1,10 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
-  Box, Card, CardContent, Button, TextField, MenuItem, Table, TableHead, TableBody, TableRow, TableCell,
+  Box, Card, CardContent, Button, TextField, InputAdornment, MenuItem, Table, TableHead, TableBody, TableRow, TableCell,
   IconButton, Tooltip, Typography, LinearProgress, Checkbox,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/AddRounded';
+import SearchIcon from '@mui/icons-material/SearchRounded';
 import EditIcon from '@mui/icons-material/EditOutlined';
 import DeleteIcon from '@mui/icons-material/DeleteOutline';
 import OverIcon from '@mui/icons-material/WarningAmberRounded';
@@ -15,6 +16,7 @@ import { BulkActionBar } from '../../components/data/BulkActionBar';
 import { BulkResultDialog } from '../../components/data/BulkResultDialog';
 import { AllocationFormDialog } from './AllocationFormDialog';
 import { usePaginatedList } from '../../hooks/usePaginatedList';
+import { useUrlSearchFilter } from '../../hooks/useUrlSearchFilter';
 import { useAsync } from '../../hooks/useAsync';
 import { useBulk } from '../../hooks/useBulk';
 import { useSelection } from '../../utils/selection';
@@ -41,6 +43,7 @@ export default function AllocationsPage() {
   const { role } = useAuth();
   const toast = useToast();
   const list = usePaginatedList(listAllocations, { limit: 10 });
+  const [search, setSearch] = useUrlSearchFilter(list);
   const { data: resData } = useAsync(() => listResources({ limit: 200 }), []);
   const { data: projData } = useAsync(() => listProjects({ limit: 200 }), []);
   const { data: over, refetch: refetchOver } = useAsync(overAllocated, []);
@@ -155,6 +158,11 @@ export default function AllocationsPage() {
       )}
 
       <Box sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap' }}>
+        <TextField
+          size="small" placeholder="Search resource or project…" value={search} onChange={(e) => setSearch(e.target.value)}
+          sx={{ minWidth: 240 }}
+          InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon sx={{ fontSize: 18, color: 'text.disabled' }} /></InputAdornment> }}
+        />
         <TextField select size="small" label="Resource" value={list.filters.resource_id || ''} sx={{ minWidth: 200 }}
           onChange={(e) => list.setFilters({ resource_id: e.target.value })}>
           <MenuItem value="">All resources</MenuItem>

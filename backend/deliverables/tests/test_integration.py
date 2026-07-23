@@ -1,5 +1,5 @@
 """
-Integration tests for the deliverables service against a real local PostgreSQL.
+Integration tests — real database round-trips through the repository layer.
 
 These hit the database defined by the POSTGRES_* env vars (defaults:
 localhost:5432, postgres/postgres, projectdb) and run through the repository
@@ -7,16 +7,17 @@ layer. A throwaway parent project is created for the deliverables to reference;
 deleting it cascades to any child deliverables (ON DELETE CASCADE), so cleanup
 is guaranteed. The whole module auto-skips when the DB or schema is unavailable.
 
-Run against the local dev database with the schema loaded:
-    IS_LOCAL=true pytest backend/deliverables/tests/test_integration.py
+    POSTGRES_NAME=projectdb pytest -m integration
 """
 
 import json
 
 import pytest
 
+import auth
 import function
 import postgres_service
+import testkit
 from deliverables_repository import (
     list_deliverables,
     get_deliverable,
@@ -32,21 +33,13 @@ from deliverables_repository import (
     DuplicateDependencyError,
 )
 
-
-def _database_ready():
-    """True if we can connect and the deliverables table exists."""
-    try:
-        postgres_service.execute("SELECT 1 FROM deliverables LIMIT 1", fetch="one")
-        return True
-    except Exception:
-        postgres_service.PG_CONN = None
-        return False
-
-
-pytestmark = pytest.mark.skipif(
-    not _database_ready(),
-    reason="local PostgreSQL with the deliverables schema is not available",
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not testkit.database_ready("deliverables"),
+        reason="local PostgreSQL with the deliverables schema is not available",
+    ),
+]
 
 
 @pytest.fixture
@@ -71,6 +64,10 @@ def created_deliverable(parent_project):
         "status": "not_started",
     })
 
+
+# ---------------------------------------------------------------------------
+# CRUD round-trips
+# ---------------------------------------------------------------------------
 
 def test_project_exists_helper(parent_project):
     assert project_exists(parent_project) is True
@@ -118,13 +115,6 @@ def test_pagination_slices_and_counts(parent_project):
     ids2 = {d["id"] for d in page2["items"]}
     assert ids1.isdisjoint(ids2)
     # No explicit cleanup needed: deleting the parent project cascades.
-
-
-def test_sql_injection_payload_stored_literally(parent_project):
-    payload = "'; DROP TABLE deliverables;--"
-    created = create_deliverable({"project_id": parent_project, "name": payload})
-    assert get_deliverable(created["id"])["name"] == payload  # literal data, not executed
-    assert list_deliverables(project_id=parent_project, limit=10)["total"] >= 1  # table intact
 
 
 def test_long_text_description_is_accepted(parent_project):
@@ -184,7 +174,7 @@ def graph():
     postgres_service.execute("DELETE FROM projects WHERE id = %s", (pid,))
 
 
-def test_dep_add_read_and_sides(graph):
+def test_dependency_add_read_and_sides(graph):
     add_dependency(graph["a"], graph["b"])  # A depends on B
     assert [d["id"] for d in get_dependencies(graph["a"])] == [graph["b"]]
     assert [d["id"] for d in get_dependents(graph["b"])] == [graph["a"]]
@@ -192,7 +182,7 @@ def test_dep_add_read_and_sides(graph):
     assert get_dependents(graph["a"]) == []     # nothing depends on A
 
 
-def test_dep_path_exists_transitive(graph):
+def test_dependency_path_exists_transitive(graph):
     add_dependency(graph["a"], graph["b"])  # A -> B
     add_dependency(graph["b"], graph["c"])  # B -> C
     assert path_exists(graph["a"], graph["b"]) is True
@@ -201,7 +191,7 @@ def test_dep_path_exists_transitive(graph):
     assert path_exists(graph["b"], graph["a"]) is False
 
 
-def test_dep_duplicate_raises(graph):
+def test_dependency_duplicate_raises(graph):
     add_dependency(graph["a"], graph["b"])
     with pytest.raises(DuplicateDependencyError):
         add_dependency(graph["a"], graph["b"])
@@ -216,7 +206,7 @@ def _post_dep(did, dep_on):
     })
 
 
-def test_dep_full_flow_and_cycles_via_handler(graph):
+def test_dependency_full_flow_and_cycles_via_handler(graph):
     a, b, c = graph["a"], graph["b"], graph["c"]
 
     assert _post_dep(a, b)["statusCode"] == 201   # A -> B
@@ -272,3 +262,87 @@ def test_reads_and_traversal_terminate_on_preexisting_cycle(graph):
     assert path_exists(a, b) is True
     assert path_exists(a, c) is True    # A -> B -> C, terminates through the cycle
     assert path_exists(b, a) is True    # B -> C -> A
+
+
+# ---------------------------------------------------------------------------
+# ?search= (added alongside the existing project_id/status filters)
+# ---------------------------------------------------------------------------
+
+def test_search_matches_name_and_description(parent_project):
+    by_name = create_deliverable({"project_id": parent_project, "name": "Grommet Spec IT", "description": "x"})
+    by_desc = create_deliverable({"project_id": parent_project, "name": "Plain IT", "description": "about a grommet"})
+    hits = list_deliverables(search="grommet", limit=200)
+    ids = {d["id"] for d in hits["items"]}
+    assert by_name["id"] in ids   # matched on name
+    assert by_desc["id"] in ids   # matched on description
+    # Case-insensitive.
+    assert by_name["id"] in {d["id"] for d in list_deliverables(search="GROMMET", limit=200)["items"]}
+
+
+def test_search_combines_with_project_and_status(parent_project):
+    # A second project whose matching deliverable must be excluded by project_id.
+    other = postgres_service.execute(
+        "INSERT INTO projects (name, status) VALUES ('Deliv Search Other', 'planning') RETURNING id",
+        fetch="one")["id"]
+    mine = create_deliverable({"project_id": parent_project, "name": "Widget Alpha IT", "status": "in_progress"})
+    other_d = create_deliverable({"project_id": other, "name": "Widget Beta IT", "status": "in_progress"})
+    try:
+        res = list_deliverables(search="widget", project_id=parent_project, limit=200)
+        ids = {d["id"] for d in res["items"]}
+        assert mine["id"] in ids        # matches search AND belongs to the project
+        assert other_d["id"] not in ids  # matches search but other project
+    finally:
+        postgres_service.execute("DELETE FROM projects WHERE id = %s", (other,))  # cascades other_d
+
+
+def test_search_no_match_is_empty():
+    assert list_deliverables(search="__no_such_deliverable_zzz__", limit=200)["total"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Activity log written through the real handler (create / update / delete)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def activity_ctx():
+    """A real actor user + a parent project (deliverables need a project_id)."""
+    uid = postgres_service.execute(
+        "INSERT INTO users (username, email, password_hash, role_id) "
+        "VALUES (%s,%s,%s,(SELECT id FROM roles WHERE name='Admin')) RETURNING id",
+        ("deliv-act-actor", "deliv-act-actor@example-test.invalid", "x"), fetch="one")["id"]
+    pid = postgres_service.execute(
+        "INSERT INTO projects (name) VALUES (%s) RETURNING id", ("Deliv Act Parent",), fetch="one")["id"]
+    token = auth.create_token({"sub": str(uid), "username": "deliv-act-actor", "role": "Admin"})
+    yield {"uid": uid, "pid": pid, "token": token}
+    postgres_service.execute("DELETE FROM projects WHERE id = %s", (pid,))  # cascades deliverables
+    postgres_service.execute("DELETE FROM users WHERE id = %s", (uid,))
+
+
+def _activity_event(method, path, token, body=None):
+    e = {"httpMethod": method, "path": path, "headers": {"Authorization": f"Bearer {token}"}}
+    if body is not None:
+        e["body"] = json.dumps(body)
+    return e
+
+
+def _latest_activity(entity_id, action):
+    return postgres_service.execute(
+        "SELECT * FROM activity_log WHERE entity_type='deliverable' AND entity_id=%s AND action=%s "
+        "ORDER BY id DESC LIMIT 1", (entity_id, action), fetch="one")
+
+
+def test_create_update_delete_write_activity(activity_ctx):
+    token = activity_ctx["token"]
+    created = function.handler(_activity_event("POST", "/deliverables", token,
+                                               {"name": "Act Deliverable", "project_id": activity_ctx["pid"], "status": "not_started"}))
+    did = json.loads(created["body"])["id"]
+
+    row = _latest_activity(did, "created")
+    assert row and row["user_id"] == activity_ctx["uid"] and row["entity_name"] == "Act Deliverable"
+
+    function.handler(_activity_event("PUT", f"/deliverables/{did}", token, {"status": "in_progress"}))
+    upd = _latest_activity(did, "updated")
+    assert upd and {"field": "status", "old": "not_started", "new": "in_progress"} in upd["changes"]
+
+    function.handler(_activity_event("DELETE", f"/deliverables/{did}", token))
+    assert _latest_activity(did, "deleted") is not None

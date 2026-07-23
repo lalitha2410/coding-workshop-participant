@@ -23,7 +23,7 @@ class DuplicateDependencyError(Exception):
     """Raised when a (deliverable_id, depends_on_id) dependency already exists."""
 
 
-def _deliverable_filters(project_id, status):
+def _deliverable_filters(project_id, status, search=None):
     """Build the shared WHERE clause + params for list/count."""
     clauses, params = [], []
     if project_id:
@@ -32,18 +32,23 @@ def _deliverable_filters(project_id, status):
     if status:
         clauses.append("status = %s")
         params.append(status)
+    if search:
+        # Case-insensitive partial match on name or description. Parameterized.
+        clauses.append("(name ILIKE %s OR description ILIKE %s)")
+        like = f"%{search}%"
+        params.extend([like, like])
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     return where, params
 
 
-def list_deliverables(project_id=None, status=None, limit=50, offset=0):
+def list_deliverables(project_id=None, status=None, search=None, limit=50, offset=0):
     """
     Return a page of deliverables (optionally filtered) plus pagination info.
 
     Shape: {"items": [...], "total": <int>, "limit": <int>, "offset": <int>}.
     `total` counts all rows matching the filters, ignoring limit/offset.
     """
-    where, params = _deliverable_filters(project_id, status)
+    where, params = _deliverable_filters(project_id, status, search)
     total = execute(f"SELECT COUNT(*) AS n FROM deliverables{where}", params, fetch="one")["n"]
     items = execute(
         f"SELECT {_COLUMNS} FROM deliverables{where} ORDER BY id LIMIT %s OFFSET %s",

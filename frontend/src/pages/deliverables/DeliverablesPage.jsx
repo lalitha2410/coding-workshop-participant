@@ -1,9 +1,10 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
-  Box, Card, Button, TextField, MenuItem, Table, TableHead, TableBody, TableRow, TableCell,
+  Box, Card, Button, TextField, InputAdornment, MenuItem, Table, TableHead, TableBody, TableRow, TableCell,
   IconButton, Tooltip, LinearProgress, Typography, Checkbox,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/AddRounded';
+import SearchIcon from '@mui/icons-material/SearchRounded';
 import EditIcon from '@mui/icons-material/EditOutlined';
 import DeleteIcon from '@mui/icons-material/DeleteOutline';
 import LabelIcon from '@mui/icons-material/LabelOutlined';
@@ -19,6 +20,7 @@ import { BulkStatusDialog } from '../../components/data/BulkStatusDialog';
 import { BulkResultDialog } from '../../components/data/BulkResultDialog';
 import { DeliverableFormDialog } from './DeliverableFormDialog';
 import { usePaginatedList } from '../../hooks/usePaginatedList';
+import { useUrlSearchFilter } from '../../hooks/useUrlSearchFilter';
 import { useAsync } from '../../hooks/useAsync';
 import { useBulk } from '../../hooks/useBulk';
 import { useSelection } from '../../utils/selection';
@@ -39,6 +41,7 @@ export default function DeliverablesPage() {
   const { role } = useAuth();
   const toast = useToast();
   const list = usePaginatedList(listDeliverables, { limit: 10 });
+  const [search, setSearch] = useUrlSearchFilter(list);
   const { data: projectsData } = useAsync(() => listProjects({ limit: 200 }), []);
   const projects = projectsData?.items || [];
   const projectName = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p.name])), [projects]);
@@ -111,6 +114,11 @@ export default function DeliverablesPage() {
       />
 
       <Box sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap' }}>
+        <TextField
+          size="small" placeholder="Search deliverables…" value={search} onChange={(e) => setSearch(e.target.value)}
+          sx={{ minWidth: 240 }}
+          InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon sx={{ fontSize: 18, color: 'text.disabled' }} /></InputAdornment> }}
+        />
         <TextField select size="small" label="Project" value={list.filters.project_id || ''} sx={{ minWidth: 220 }}
           onChange={(e) => list.setFilters({ project_id: e.target.value })}>
           <MenuItem value="">All projects</MenuItem>

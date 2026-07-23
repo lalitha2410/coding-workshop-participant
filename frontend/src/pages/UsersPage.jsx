@@ -21,6 +21,7 @@ import { BulkActionBar } from '../components/data/BulkActionBar';
 import { BulkResultDialog } from '../components/data/BulkResultDialog';
 import { UserFormDialog } from './UserFormDialog';
 import { usePaginatedList } from '../hooks/usePaginatedList';
+import { useUrlSearchFilter } from '../hooks/useUrlSearchFilter';
 import { useBulk } from '../hooks/useBulk';
 import { useSelection } from '../utils/selection';
 import { pluralize } from '../utils/bulk';
@@ -40,6 +41,7 @@ export default function UsersPage() {
   const { user: me, role } = useAuth();
   const toast = useToast();
   const list = usePaginatedList(listUsers, { limit: 10 });
+  const [search, setSearch] = useUrlSearchFilter(list);
   const [form, setForm] = useState({ open: false, user: null });
   const [roleChange, setRoleChange] = useState(null); // { user, newRole, busy }
   const [del, setDel] = useState({ open: false, user: null, busy: false });
@@ -103,8 +105,8 @@ export default function UsersPage() {
       <Box sx={{ mb: 2, maxWidth: 340 }}>
         <TextField
           size="small" fullWidth placeholder="Search by username or email…"
-          value={list.filters.search || ''}
-          onChange={(e) => list.setFilters({ search: e.target.value })}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon sx={{ fontSize: 18, color: 'text.disabled' }} /></InputAdornment> }}
         />
       </Box>

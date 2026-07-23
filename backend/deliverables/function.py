@@ -31,7 +31,7 @@ from deliverables_repository import (
     DuplicateDependencyError,
 )
 from validation import validate_create, validate_update
-from pagination import parse_pagination, PaginationError
+from pagination import parse_pagination, parse_search, PaginationError
 
 # Configure logging for Lambda.
 logger = logging.getLogger()
@@ -130,11 +130,13 @@ def _handle_list(event):
     query = _get_query(event)
     try:
         limit, offset = parse_pagination(query)
+        search = parse_search(query)
     except PaginationError as exc:
         return _error(400, str(exc))
     result = list_deliverables(
         project_id=query.get("project_id"),
         status=query.get("status"),
+        search=search,
         limit=limit,
         offset=offset,
     )

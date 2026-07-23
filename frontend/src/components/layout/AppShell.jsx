@@ -9,6 +9,7 @@ import { Outlet } from 'react-router-dom';
 import { Box, Drawer } from '@mui/material';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
+import { CommandPaletteProvider } from '../search/CommandPaletteProvider';
 import { layout } from '../../theme/tokens';
 
 export default function AppShell() {
@@ -16,6 +17,7 @@ export default function AppShell() {
   const W = layout.sidebarWidth;
 
   return (
+    <CommandPaletteProvider>
     <Box sx={{ minHeight: '100dvh', bgcolor: 'background.default' }}>
       {/* Permanent sidebar (desktop) */}
       <Box
@@ -52,5 +54,6 @@ export default function AppShell() {
         </Box>
       </Box>
     </Box>
+    </CommandPaletteProvider>
   );
 }

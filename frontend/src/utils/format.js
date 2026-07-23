@@ -24,9 +24,13 @@ export function fmtDate(value) {
 }
 
 /**
- * Parse a backend timestamp. PostgreSQL NOW() is serialized without a timezone
- * suffix; the DB runs in UTC, so treat a naive ISO string as UTC (append 'Z')
- * to avoid a local-offset skew in relative times.
+ * Parse a backend timestamp into an absolute instant.
+ *
+ * The backend now serializes timestamps as timezone-aware (TIMESTAMPTZ → an ISO
+ * string with an offset like `+05:30` or `Z`), so those parse unambiguously. As
+ * a defensive fallback, a *naive* string (no offset) is assumed to be UTC — the
+ * conventional default — rather than silently reinterpreted as the viewer's
+ * local time, which would skew relative times by the local offset.
  */
 function parseTs(value) {
   if (!value) return null;
@@ -36,12 +40,22 @@ function parseTs(value) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-/** Full, exact timestamp for tooltips, e.g. "Jul 23, 2026, 10:04 AM". */
+// Beyond this age, an exact date is more useful than "23 days ago".
+const RELATIVE_MAX_DAYS = 7;
+
+/** Absolute date only, e.g. "23 Jul 2026". */
+export function fmtAbsDate(value) {
+  const d = parseTs(value);
+  if (!d) return '—';
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/** Full, exact timestamp for tooltips, e.g. "23 Jul 2026, 14:32". */
 export function fmtDateTime(value) {
   const d = parseTs(value);
   if (!d) return '—';
-  return d.toLocaleString('en-US', {
-    month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+  return d.toLocaleString('en-GB', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
   });
 }
 
@@ -55,6 +69,19 @@ export function fmtRelative(value, now = Date.now()) {
   const phrase = relativePhrase(s);
   if (phrase === 'just now') return phrase;
   return future ? `in ${phrase}` : `${phrase} ago`;
+}
+
+/**
+ * Relative time for recent events, falling back to an absolute date once an
+ * entry is older than RELATIVE_MAX_DAYS (so an audit log reads "5 hours ago" but
+ * "23 Jul 2026" rather than an unhelpful "23 days ago").
+ */
+export function fmtRelativeOrDate(value, now = Date.now()) {
+  const d = parseTs(value);
+  if (!d) return '—';
+  const ageMs = now - d.getTime();
+  if (ageMs > RELATIVE_MAX_DAYS * 86400000) return fmtAbsDate(value);
+  return fmtRelative(value, now);
 }
 
 function relativePhrase(s) {

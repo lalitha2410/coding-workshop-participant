@@ -1,19 +1,24 @@
 """
-Integration tests for the allocations service against a real local PostgreSQL.
+Integration tests — real database round-trips through the repository layer.
 
 These hit the database defined by the POSTGRES_* env vars (defaults:
-localhost:5432, postgres/postgres, projectdb) and run through the repository
-layer. Throwaway parent projects and resources are created for the allocations
-to reference; deleting them cascades to the allocations (ON DELETE CASCADE), so
-cleanup is guaranteed. The whole module auto-skips when the DB/schema is absent.
+localhost:5432, postgres/postgres, projectdb). Throwaway parent projects and
+resources are created for the allocations to reference; deleting them cascades to
+the allocations (ON DELETE CASCADE), so cleanup is guaranteed. The whole module
+auto-skips when the database or `allocations` schema is unavailable, so the
+unit/api/security suites still run anywhere.
 
-Run against the local dev database with the schema loaded:
-    IS_LOCAL=true pytest backend/allocations/tests/test_integration.py
+    POSTGRES_NAME=projectdb pytest -m integration
 """
+
+import json
 
 import pytest
 
+import auth
+import function
 import postgres_service
+import testkit
 from allocations_repository import (
     list_allocations,
     get_allocation,
@@ -26,20 +31,13 @@ from allocations_repository import (
     DuplicateAllocationError,
 )
 
-
-def _database_ready():
-    try:
-        postgres_service.execute("SELECT 1 FROM allocations LIMIT 1", fetch="one")
-        return True
-    except Exception:
-        postgres_service.PG_CONN = None
-        return False
-
-
-pytestmark = pytest.mark.skipif(
-    not _database_ready(),
-    reason="local PostgreSQL with the allocations schema is not available",
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not testkit.database_ready("allocations"),
+        reason="local PostgreSQL with the allocations schema is not available",
+    ),
+]
 
 
 def _mk_project(name):
@@ -76,7 +74,7 @@ def env():
 # Reference-existence helpers
 # ---------------------------------------------------------------------------
 
-def test_reference_helpers(env):
+def test_reference_helpers_report_existence(env):
     assert resource_exists(env["r1"]) is True
     assert project_exists(env["p1"]) is True
     assert resource_exists(2_000_000_000) is False
@@ -87,20 +85,20 @@ def test_reference_helpers(env):
 # CRUD
 # ---------------------------------------------------------------------------
 
-def test_create_persists_and_default_pct(env):
+def test_create_persists_row_and_applies_default_pct(env):
     a = create_allocation({"resource_id": env["r1"], "project_id": env["p1"]})
     assert a["id"] is not None
     assert a["resource_id"] == env["r1"]
     assert a["allocation_pct"] == 0  # COALESCE default
 
 
-def test_get_and_missing(env):
+def test_get_returns_created_row_and_none_when_missing(env):
     a = create_allocation({"resource_id": env["r1"], "project_id": env["p1"], "allocation_pct": 30})
     assert get_allocation(a["id"])["allocation_pct"] == 30
     assert get_allocation(2_000_000_000) is None
 
 
-def test_list_filters(env):
+def test_list_honours_resource_and_project_filters(env):
     a1 = create_allocation({"resource_id": env["r1"], "project_id": env["p1"], "allocation_pct": 10})
     a2 = create_allocation({"resource_id": env["r1"], "project_id": env["p2"], "allocation_pct": 20})
     a3 = create_allocation({"resource_id": env["r2"], "project_id": env["p1"], "allocation_pct": 30})
@@ -127,11 +125,11 @@ def test_partial_update_preserves_other_fields(env):
     assert updated["project_id"] == env["p1"]
 
 
-def test_update_missing_returns_none():
+def test_update_missing_id_returns_none():
     assert update_allocation(2_000_000_000, {"allocation_pct": 10}) is None
 
 
-def test_delete_removes_row(env):
+def test_delete_removes_row_and_is_idempotent(env):
     a = create_allocation({"resource_id": env["r2"], "project_id": env["p2"], "allocation_pct": 5})
     assert delete_allocation(a["id"])["id"] == a["id"]
     assert get_allocation(a["id"]) is None
@@ -142,7 +140,7 @@ def test_delete_removes_row(env):
 # Constraints
 # ---------------------------------------------------------------------------
 
-def test_duplicate_pair_raises(env):
+def test_duplicate_pair_raises_duplicate_allocation_error(env):
     create_allocation({"resource_id": env["r1"], "project_id": env["p1"], "allocation_pct": 10})
     with pytest.raises(DuplicateAllocationError):
         create_allocation({"resource_id": env["r1"], "project_id": env["p1"], "allocation_pct": 20})
@@ -184,7 +182,7 @@ def test_over_allocation_calculation(env):
     assert summary_by_id[env["r2"]]["over_allocated"] is False
 
 
-def test_pagination_slices_and_counts(env):
+def test_pagination_slices_pages_and_counts_total(env):
     create_allocation({"resource_id": env["r1"], "project_id": env["p1"], "allocation_pct": 10})
     create_allocation({"resource_id": env["r1"], "project_id": env["p2"], "allocation_pct": 20})
     page1 = list_allocations(resource_id=env["r1"], limit=1, offset=0)
@@ -194,7 +192,7 @@ def test_pagination_slices_and_counts(env):
     assert page1["items"][0]["id"] != page2["items"][0]["id"]  # distinct pages
 
 
-def test_exactly_100_is_not_over_allocated(env):
+def test_exactly_100_percent_is_not_over_allocated(env):
     create_allocation({"resource_id": env["r1"], "project_id": env["p1"], "allocation_pct": 100})
     over_ids = {row["resource_id"] for row in resource_allocation_totals(over_only=True)}
     assert env["r1"] not in over_ids  # 100% is fully allocated, not OVER
@@ -214,3 +212,112 @@ def test_summary_includes_unallocated_resource(env):
     # But it must NOT appear in the over-allocated (INNER JOIN) view.
     over_ids = {row["resource_id"] for row in resource_allocation_totals(over_only=True)}
     assert env["r2"] not in over_ids
+
+
+# ---------------------------------------------------------------------------
+# ?search= — matches the RELATED resource name or project name (subquery join)
+# ---------------------------------------------------------------------------
+
+def test_search_matches_related_resource_name():
+    p = _mk_project("Srch Alloc Proj Ordinary")
+    r = _mk_resource("Quibble Searchable Person", "quibble-alloc@example-test.invalid")
+    a = create_allocation({"resource_id": r, "project_id": p, "allocation_pct": 25})
+    try:
+        ids = {x["id"] for x in list_allocations(search="quibble", limit=200)["items"]}
+        assert a["id"] in ids          # found via the resource's name
+        # Case-insensitive.
+        assert a["id"] in {x["id"] for x in list_allocations(search="QUIBBLE", limit=200)["items"]}
+    finally:
+        postgres_service.execute("DELETE FROM projects WHERE id = %s", (p,))
+        postgres_service.execute("DELETE FROM resources WHERE id = %s", (r,))
+
+
+def test_search_matches_related_project_name():
+    p = _mk_project("Wobblethon Analytics")
+    r = _mk_resource("Srch Alloc Person Ordinary", "srch-alloc-person@example-test.invalid")
+    a = create_allocation({"resource_id": r, "project_id": p, "allocation_pct": 40})
+    try:
+        ids = {x["id"] for x in list_allocations(search="wobblethon", limit=200)["items"]}
+        assert a["id"] in ids          # found via the project's name
+    finally:
+        postgres_service.execute("DELETE FROM projects WHERE id = %s", (p,))
+        postgres_service.execute("DELETE FROM resources WHERE id = %s", (r,))
+
+
+def test_search_combines_with_resource_filter():
+    p = _mk_project("Combine Alloc Proj")
+    r1 = _mk_resource("Combine Zorptastic One", "combine-alloc-1@example-test.invalid")
+    r2 = _mk_resource("Combine Zorptastic Two", "combine-alloc-2@example-test.invalid")
+    a1 = create_allocation({"resource_id": r1, "project_id": p, "allocation_pct": 10})
+    a2 = create_allocation({"resource_id": r2, "project_id": p, "allocation_pct": 20})
+    try:
+        # Both match the search "zorptastic", but the resource_id filter keeps only a1.
+        res = list_allocations(search="zorptastic", resource_id=r1, limit=200)
+        ids = {x["id"] for x in res["items"]}
+        assert a1["id"] in ids
+        assert a2["id"] not in ids
+        # No duplicate rows from the subquery join.
+        assert res["total"] == len(res["items"])
+    finally:
+        postgres_service.execute("DELETE FROM projects WHERE id = %s", (p,))
+        for rid in (r1, r2):
+            postgres_service.execute("DELETE FROM resources WHERE id = %s", (rid,))
+
+
+def test_search_with_no_match_is_empty():
+    assert list_allocations(search="__no_such_alloc_zzz__", limit=200)["total"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Activity log written through the real handler (create / update / delete)
+#
+# Allocations have no name of their own, so the entity_name is a readable
+# 'Resource on Project' label.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def activity_ctx():
+    """A real user, resource, and project (so FKs are satisfied) plus a token."""
+    uid = postgres_service.execute(
+        "INSERT INTO users (username, email, password_hash, role_id) "
+        "VALUES (%s,%s,%s,(SELECT id FROM roles WHERE name='Admin')) RETURNING id",
+        ("alloc-act-actor", "alloc-act-actor@example-test.invalid", "x"), fetch="one")["id"]
+    rid = postgres_service.execute(
+        "INSERT INTO resources (name, email) VALUES (%s,%s) RETURNING id",
+        ("Alloc Act Resource", "alloc-act-res@example-test.invalid"), fetch="one")["id"]
+    pid = postgres_service.execute(
+        "INSERT INTO projects (name) VALUES (%s) RETURNING id", ("Alloc Act Project",), fetch="one")["id"]
+    token = auth.create_token({"sub": str(uid), "username": "alloc-act-actor", "role": "Admin"})
+    yield {"uid": uid, "rid": rid, "pid": pid, "token": token}
+    postgres_service.execute("DELETE FROM projects WHERE id = %s", (pid,))   # cascades allocations
+    postgres_service.execute("DELETE FROM resources WHERE id = %s", (rid,))
+    postgres_service.execute("DELETE FROM users WHERE id = %s", (uid,))
+
+
+def _latest_activity(entity_id, action):
+    return postgres_service.execute(
+        "SELECT * FROM activity_log WHERE entity_type='allocation' AND entity_id=%s AND action=%s "
+        "ORDER BY id DESC LIMIT 1", (entity_id, action), fetch="one")
+
+
+def test_create_update_delete_each_write_an_activity_entry(activity_ctx):
+    token = activity_ctx["token"]
+    hdr = {"Authorization": f"Bearer {token}"}
+
+    created = function.handler(testkit.make_event(
+        "POST", "/allocations",
+        body={"resource_id": activity_ctx["rid"], "project_id": activity_ctx["pid"], "allocation_pct": 40},
+        headers=hdr))
+    aid = json.loads(created["body"])["id"]
+
+    row = _latest_activity(aid, "created")
+    assert row and row["user_id"] == activity_ctx["uid"]
+    # name-less entity -> readable 'Resource on Project' label
+    assert row["entity_name"] == "Alloc Act Resource on Alloc Act Project"
+
+    function.handler(testkit.make_event("PUT", f"/allocations/{aid}", body={"allocation_pct": 75}, headers=hdr))
+    upd = _latest_activity(aid, "updated")
+    assert upd and {"field": "allocation_pct", "old": 40, "new": 75} in upd["changes"]
+
+    function.handler(testkit.make_event("DELETE", f"/allocations/{aid}", headers=hdr))
+    assert _latest_activity(aid, "deleted") is not None

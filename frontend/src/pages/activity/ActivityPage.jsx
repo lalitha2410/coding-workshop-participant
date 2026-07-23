@@ -7,6 +7,7 @@
  * this page is an additional client-side guard via the view_activity permission.
  */
 
+import { useMemo } from 'react';
 import {
   Box, Card, TextField, MenuItem, Table, TableHead, TableBody, TableRow, TableCell,
   Avatar, Typography, Chip, Tooltip,
@@ -17,9 +18,12 @@ import { PaginationBar } from '../../components/data/PaginationBar';
 import { ExportButton } from '../../components/data/ExportButton';
 import { fetchAllRows } from '../../api/fetchAll';
 import { usePaginatedList } from '../../hooks/usePaginatedList';
+import { useAsync } from '../../hooks/useAsync';
 import { listActivity, ACTIVITY_ENTITY_TYPES, ACTIVITY_ACTIONS } from '../../api/activity';
-import { fmtRelative, fmtDateTime } from '../../utils/format';
+import { fmtRelativeOrDate, fmtDateTime } from '../../utils/format';
 import { summaryText, changeLines, actorName } from '../../utils/activityText';
+import { useAuth } from '../../auth/AuthContext';
+import { can } from '../../auth/roles';
 
 // Colour the action chip so the log is scannable at a glance.
 const ACTION_COLOR = { created: 'success', updated: 'warning', deleted: 'error' };
@@ -40,7 +44,33 @@ function initials(name = '') {
 }
 
 export default function ActivityPage() {
+  const { role } = useAuth();
+  const isAdmin = can(role, 'manage_users');
   const list = usePaginatedList(listActivity, { limit: 20 });
+
+  // Actor options come from the activity log itself — via the Activity endpoint
+  // this role can already read — NOT /auth/users (which Managers can't access, so
+  // they'd 403). This lists only people who've actually done something, and adds
+  // no new visibility: a Manager's sample already excludes user-management rows.
+  const { data: actorSample } = useAsync(() => listActivity({ limit: 200 }), []);
+  const actors = useMemo(() => {
+    const byId = new Map();
+    for (const e of actorSample?.items || []) {
+      // Newest-first, so the first username seen for an id is its latest name.
+      // Skip entries whose actor was deleted (user_id nulled) — can't filter by id.
+      if (e.user_id != null && e.username && !byId.has(e.user_id)) byId.set(e.user_id, e.username);
+    }
+    return [...byId.entries()]
+      .map(([id, username]) => ({ id, username }))
+      .sort((a, b) => a.username.localeCompare(b.username, undefined, { sensitivity: 'base' }));
+  }, [actorSample]);
+
+  // Hide the 'user' entity type from non-Admins — they never receive those rows,
+  // so offering the filter would just return nothing.
+  const entityTypeOptions = useMemo(
+    () => ACTIVITY_ENTITY_TYPES.filter((t) => t !== 'user' || isAdmin),
+    [isAdmin],
+  );
 
   const exportFilters = {
     entity_type: list.filters.entity_type,
@@ -70,7 +100,7 @@ export default function ActivityPage() {
           onChange={(e) => list.setFilters({ entity_type: e.target.value })}
         >
           <MenuItem value="">All types</MenuItem>
-          {ACTIVITY_ENTITY_TYPES.map((t) => <MenuItem key={t} value={t} sx={{ textTransform: 'capitalize' }}>{t}</MenuItem>)}
+          {entityTypeOptions.map((t) => <MenuItem key={t} value={t} sx={{ textTransform: 'capitalize' }}>{t}</MenuItem>)}
         </TextField>
         <TextField
           select size="small" label="Action" sx={{ minWidth: 150 }}
@@ -81,11 +111,15 @@ export default function ActivityPage() {
           {ACTIVITY_ACTIONS.map((a) => <MenuItem key={a} value={a} sx={{ textTransform: 'capitalize' }}>{a}</MenuItem>)}
         </TextField>
         <TextField
-          size="small" label="User ID" type="number" sx={{ minWidth: 120 }}
-          placeholder="e.g. 3"
-          value={list.filters.user || ''}
+          select size="small" label="User" sx={{ minWidth: 180 }}
+          value={list.filters.user ?? ''}
           onChange={(e) => list.setFilters({ user: e.target.value })}
-        />
+        >
+          {/* Value is the user_id, label is the username — so the user picks a
+              name while the backend still filters by id (contract unchanged). */}
+          <MenuItem value="">All users</MenuItem>
+          {actors.map((a) => <MenuItem key={a.id} value={a.id}>{a.username}</MenuItem>)}
+        </TextField>
       </Box>
 
       <Card>
@@ -138,7 +172,7 @@ export default function ActivityPage() {
                     </TableCell>
                     <TableCell align="right" sx={{ whiteSpace: 'nowrap', color: 'text.secondary' }}>
                       <Tooltip title={fmtDateTime(e.created_at)}>
-                        <span>{fmtRelative(e.created_at)}</span>
+                        <span>{fmtRelativeOrDate(e.created_at)}</span>
                       </Tooltip>
                     </TableCell>
                   </TableRow>

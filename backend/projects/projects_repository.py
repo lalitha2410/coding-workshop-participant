@@ -15,7 +15,7 @@ _COLUMNS = (
 )
 
 
-def _project_filters(status, department):
+def _project_filters(status, department, search=None):
     """Build the shared WHERE clause + params for list/count."""
     clauses, params = [], []
     if status:
@@ -24,18 +24,23 @@ def _project_filters(status, department):
     if department:
         clauses.append("department = %s")
         params.append(department)
+    if search:
+        # Case-insensitive partial match on name or description. Parameterized.
+        clauses.append("(name ILIKE %s OR description ILIKE %s)")
+        like = f"%{search}%"
+        params.extend([like, like])
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     return where, params
 
 
-def list_projects(status=None, department=None, limit=50, offset=0):
+def list_projects(status=None, department=None, search=None, limit=50, offset=0):
     """
     Return a page of projects (optionally filtered) plus pagination info.
 
     Shape: {"items": [...], "total": <int>, "limit": <int>, "offset": <int>}.
     `total` counts all rows matching the filters, ignoring limit/offset.
     """
-    where, params = _project_filters(status, department)
+    where, params = _project_filters(status, department, search)
     total = execute(f"SELECT COUNT(*) AS n FROM projects{where}", params, fetch="one")["n"]
     items = execute(
         f"SELECT {_COLUMNS} FROM projects{where} ORDER BY id LIMIT %s OFFSET %s",

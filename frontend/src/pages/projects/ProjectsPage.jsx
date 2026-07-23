@@ -1,9 +1,10 @@
 import { useCallback, useState } from 'react';
 import {
-  Box, Card, Button, MenuItem, TextField, Table, TableHead, TableBody, TableRow, TableCell,
+  Box, Card, Button, MenuItem, TextField, InputAdornment, Table, TableHead, TableBody, TableRow, TableCell,
   IconButton, Tooltip, LinearProgress, Checkbox,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/AddRounded';
+import SearchIcon from '@mui/icons-material/SearchRounded';
 import EditIcon from '@mui/icons-material/EditOutlined';
 import DeleteIcon from '@mui/icons-material/DeleteOutline';
 import LabelIcon from '@mui/icons-material/LabelOutlined';
@@ -17,6 +18,7 @@ import { BulkStatusDialog } from '../../components/data/BulkStatusDialog';
 import { BulkResultDialog } from '../../components/data/BulkResultDialog';
 import { ProjectFormDialog } from './ProjectFormDialog';
 import { usePaginatedList } from '../../hooks/usePaginatedList';
+import { useUrlSearchFilter } from '../../hooks/useUrlSearchFilter';
 import { useBulk } from '../../hooks/useBulk';
 import { useSelection } from '../../utils/selection';
 import { pluralize } from '../../utils/bulk';
@@ -48,6 +50,7 @@ export default function ProjectsPage() {
   const { role } = useAuth();
   const toast = useToast();
   const list = usePaginatedList(listProjects, { limit: 10 });
+  const [search, setSearch] = useUrlSearchFilter(list);
   const [form, setForm] = useState({ open: false, project: null });
   const [del, setDel] = useState({ open: false, project: null, busy: false });
 
@@ -108,6 +111,11 @@ export default function ProjectsPage() {
 
       {/* Filters */}
       <Box sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap' }}>
+        <TextField
+          size="small" placeholder="Search projects…" value={search} onChange={(e) => setSearch(e.target.value)}
+          sx={{ minWidth: 240 }}
+          InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon sx={{ fontSize: 18, color: 'text.disabled' }} /></InputAdornment> }}
+        />
         <TextField select size="small" label="Status" value={list.filters.status || ''} sx={{ minWidth: 160 }}
           onChange={(e) => list.setFilters({ status: e.target.value })}>
           <MenuItem value="">All statuses</MenuItem>

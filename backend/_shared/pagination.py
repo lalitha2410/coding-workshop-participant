@@ -12,10 +12,33 @@ query params into validated (limit, offset), then return a uniform envelope:
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
+MAX_SEARCH_LEN = 200
 
 
 class PaginationError(ValueError):
     """Raised for invalid limit/offset query parameters (maps to HTTP 400)."""
+
+
+def parse_search(query, key="search"):
+    """
+    Parse and validate an optional ?search term from a query-params dict.
+
+    Returns the trimmed string, or None when absent/blank (so callers can treat
+    "no search" uniformly). Raises PaginationError (HTTP 400) when the term is
+    longer than MAX_SEARCH_LEN. The value is always used as a bound parameter by
+    callers — never interpolated into SQL — so there is no injection surface.
+    """
+    raw = (query or {}).get(key)
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise PaginationError(f"`{key}` must be a string.")
+    term = raw.strip()
+    if not term:
+        return None
+    if len(term) > MAX_SEARCH_LEN:
+        raise PaginationError(f"`{key}` must be at most {MAX_SEARCH_LEN} characters.")
+    return term
 
 
 def parse_pagination(query):

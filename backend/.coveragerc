@@ -1,0 +1,24 @@
+# Coverage config shared by every backend service run (see bin/coverage.sh).
+# Measures application code only: the service's own modules plus the shared
+# modules synced into it — never the vendored Lambda deps or the tests.
+[run]
+branch = True
+omit =
+    */tests/*
+    */__pycache__/*
+    # vendored third-party dependencies bundled for Lambda packaging
+    */bcrypt/*
+    */jwt/*
+    */psycopg/*
+    */psycopg_binary/*
+    */psycopg_binary.libs/*
+    */*.dist-info/*
+    */_examples/*
+
+[report]
+show_missing = True
+precision = 1
+exclude_also =
+    # the __main__ smoke-test block at the bottom of each handler is not a test target
+    if __name__ == .__main__.:
+    raise NotImplementedError

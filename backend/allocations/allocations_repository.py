@@ -30,8 +30,13 @@ class DuplicateAllocationError(Exception):
 _COLUMNS = "id, resource_id, project_id, allocation_pct, start_date, end_date"
 
 
-def _allocation_filters(resource_id, project_id):
-    """Build the shared WHERE clause + params for list/count."""
+def _allocation_filters(resource_id, project_id, search=None):
+    """Build the shared WHERE clause + params for list/count.
+
+    `search` matches the related resource name OR project name. Implemented with
+    parameterized IN-subqueries rather than a JOIN so the row projection and
+    COUNT stay 1:1 with the allocations table (no duplicate rows).
+    """
     clauses, params = [], []
     if resource_id:
         clauses.append("resource_id = %s")
@@ -39,18 +44,25 @@ def _allocation_filters(resource_id, project_id):
     if project_id:
         clauses.append("project_id = %s")
         params.append(project_id)
+    if search:
+        clauses.append(
+            "(resource_id IN (SELECT id FROM resources WHERE name ILIKE %s) "
+            "OR project_id IN (SELECT id FROM projects WHERE name ILIKE %s))"
+        )
+        like = f"%{search}%"
+        params.extend([like, like])
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     return where, params
 
 
-def list_allocations(resource_id=None, project_id=None, limit=50, offset=0):
+def list_allocations(resource_id=None, project_id=None, search=None, limit=50, offset=0):
     """
     Return a page of allocations (optionally filtered) plus pagination info.
 
     Shape: {"items": [...], "total": <int>, "limit": <int>, "offset": <int>}.
     `total` counts all rows matching the filters, ignoring limit/offset.
     """
-    where, params = _allocation_filters(resource_id, project_id)
+    where, params = _allocation_filters(resource_id, project_id, search)
     total = execute(f"SELECT COUNT(*) AS n FROM allocations{where}", params, fetch="one")["n"]
     items = execute(
         f"SELECT {_COLUMNS} FROM allocations{where} ORDER BY id LIMIT %s OFFSET %s",
