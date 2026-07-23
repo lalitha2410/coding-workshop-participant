@@ -39,13 +39,14 @@ CREATE = "create"
 UPDATE = "update"
 DELETE = "delete"
 MANAGE_USERS = "manage_users"
+VIEW_ACTIVITY = "view_activity"  # activity log / audit trail (Manager+)
 
 # Role -> set of permitted actions (the workshop's access matrix).
 ROLE_PERMISSIONS = {
     "Viewer": {READ},
     "Contributor": {READ, CREATE, UPDATE},
-    "Manager": {READ, CREATE, UPDATE, DELETE},
-    "Admin": {READ, CREATE, UPDATE, DELETE, MANAGE_USERS},
+    "Manager": {READ, CREATE, UPDATE, DELETE, VIEW_ACTIVITY},
+    "Admin": {READ, CREATE, UPDATE, DELETE, MANAGE_USERS, VIEW_ACTIVITY},
 }
 
 # The only roles the system recognizes. A validly-signed token carrying anything

@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
   Box, Card, CardContent, Button, TextField, MenuItem, Table, TableHead, TableBody, TableRow, TableCell,
-  IconButton, Tooltip, Typography, LinearProgress,
+  IconButton, Tooltip, Typography, LinearProgress, Checkbox,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/AddRounded';
 import EditIcon from '@mui/icons-material/EditOutlined';
@@ -11,9 +11,14 @@ import { PageHeader } from '../../components/common/PageHeader';
 import { ResultStates, TableSkeleton, EmptyState } from '../../components/data/ResultStates';
 import { PaginationBar } from '../../components/data/PaginationBar';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
+import { BulkActionBar } from '../../components/data/BulkActionBar';
+import { BulkResultDialog } from '../../components/data/BulkResultDialog';
 import { AllocationFormDialog } from './AllocationFormDialog';
 import { usePaginatedList } from '../../hooks/usePaginatedList';
 import { useAsync } from '../../hooks/useAsync';
+import { useBulk } from '../../hooks/useBulk';
+import { useSelection } from '../../utils/selection';
+import { pluralize } from '../../utils/bulk';
 import { ExportButton } from '../../components/data/ExportButton';
 import { fetchAllRows } from '../../api/fetchAll';
 import { listAllocations, deleteAllocation, overAllocated } from '../../api/allocations';
@@ -60,13 +65,29 @@ export default function AllocationsPage() {
   const canCreate = can(role, 'create');
   const canUpdate = can(role, 'update');
   const canDelete = can(role, 'delete');
+  const showSelection = canDelete; // only bulk action here is delete (Manager+)
   const ready = resources.length > 0 && projects.length > 0;
+
+  const allocationLabel = useCallback(
+    (a) => `${resourceName[a.resource_id] || `#${a.resource_id}`} on ${projectName[a.project_id] || `#${a.project_id}`}`,
+    [resourceName, projectName],
+  );
+
+  const resetKey = `${list.offset}|${JSON.stringify(list.filters)}`;
+  const sel = useSelection(list.items, resetKey);
+  const bulk = useBulk({ onSettled: () => { sel.clear(); list.refetch(); refetchOver(); } });
+  const [bulkDelete, setBulkDelete] = useState(false);
 
   const onSaved = useCallback(() => {
     setForm({ open: false, allocation: null });
     list.refetch();
     refetchOver();
   }, [list, refetchOver]);
+
+  async function runBulkDelete() {
+    setBulkDelete(false);
+    await bulk.run(sel.selectedItems, (a) => deleteAllocation(a.id), { singular: 'allocation', verbPast: 'deleted' });
+  }
 
   async function confirmDelete() {
     setDel((d) => ({ ...d, busy: true }));
@@ -146,6 +167,14 @@ export default function AllocationsPage() {
         </TextField>
       </Box>
 
+      {showSelection && sel.count > 0 && (
+        <BulkActionBar count={sel.count} running={bulk.running} progress={bulk.progress} onClear={sel.clear}>
+          <Button size="small" color="error" startIcon={<DeleteIcon sx={{ fontSize: 16 }} />} disabled={bulk.running} onClick={() => setBulkDelete(true)}>
+            Delete
+          </Button>
+        </BulkActionBar>
+      )}
+
       <Card>
         <ResultStates
           loading={list.loading}
@@ -158,6 +187,11 @@ export default function AllocationsPage() {
           <Table>
             <TableHead>
               <TableRow>
+                {showSelection && (
+                  <TableCell padding="checkbox">
+                    <Checkbox size="small" checked={sel.allSelected} indeterminate={sel.someSelected} onChange={sel.toggleAll} inputProps={{ 'aria-label': 'Select all allocations on this page' }} />
+                  </TableCell>
+                )}
                 <TableCell>Resource</TableCell>
                 <TableCell>Project</TableCell>
                 <TableCell sx={{ minWidth: 180 }}>Allocation</TableCell>
@@ -166,7 +200,12 @@ export default function AllocationsPage() {
             </TableHead>
             <TableBody>
               {list.items.map((a) => (
-                <TableRow key={a.id} hover>
+                <TableRow key={a.id} hover selected={sel.isSelected(a.id)}>
+                  {showSelection && (
+                    <TableCell padding="checkbox">
+                      <Checkbox size="small" checked={sel.isSelected(a.id)} onChange={() => sel.toggle(a.id)} inputProps={{ 'aria-label': `Select ${allocationLabel(a)}` }} />
+                    </TableCell>
+                  )}
                   <TableCell sx={{ fontWeight: 600 }}>{resourceName[a.resource_id] || `#${a.resource_id}`}</TableCell>
                   <TableCell sx={{ color: 'text.secondary' }}>{projectName[a.project_id] || `#${a.project_id}`}</TableCell>
                   <TableCell>
@@ -202,6 +241,17 @@ export default function AllocationsPage() {
         confirmLabel="Delete" destructive busy={del.busy}
         onConfirm={confirmDelete} onClose={() => setDel({ open: false, allocation: null, busy: false })}
       />
+
+      <ConfirmDialog
+        open={bulkDelete}
+        title="Delete allocations?"
+        message={`Delete ${pluralize(sel.count, 'allocation')}? This can't be undone.`}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={runBulkDelete}
+        onClose={() => setBulkDelete(false)}
+      />
+      <BulkResultDialog result={bulk.result} labelFor={allocationLabel} onClose={bulk.clearResult} />
     </Box>
   );
 }

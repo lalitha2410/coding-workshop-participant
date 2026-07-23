@@ -119,5 +119,5 @@ def update_user_details(user_id, username=None, email=None):
 
 
 def delete_user(user_id):
-    """Delete a user; return {"id": ...} or None if the user did not exist."""
-    return execute("DELETE FROM users WHERE id = %s RETURNING id", (user_id,), fetch="one")
+    """Delete a user; return {"id": ..., "username": ...} or None if not found."""
+    return execute("DELETE FROM users WHERE id = %s RETURNING id, username", (user_id,), fetch="one")

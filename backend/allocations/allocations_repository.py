@@ -124,8 +124,8 @@ def update_allocation(allocation_id, data):
 
 
 def delete_allocation(allocation_id):
-    """Delete an allocation; return the deleted row ({"id": ...}) or None if not found."""
-    sql = "DELETE FROM allocations WHERE id = %s RETURNING id"
+    """Delete an allocation; return the deleted row (id + fk ids) or None if not found."""
+    sql = "DELETE FROM allocations WHERE id = %s RETURNING id, resource_id, project_id"
     return execute(sql, (allocation_id,), fetch="one")
 
 
@@ -139,6 +139,18 @@ def project_exists(project_id):
     """Return True if a project with the given id exists (FK reference check)."""
     row = execute("SELECT 1 FROM projects WHERE id = %s", (project_id,), fetch="one")
     return row is not None
+
+
+def allocation_label(resource_id, project_id):
+    """Human-readable 'Resource on Project' label for activity logs. Never raises."""
+    try:
+        r = execute("SELECT name FROM resources WHERE id = %s", (resource_id,), fetch="one")
+        p = execute("SELECT name FROM projects WHERE id = %s", (project_id,), fetch="one")
+        rname = r["name"] if r else f"#{resource_id}"
+        pname = p["name"] if p else f"#{project_id}"
+        return f"{rname} on {pname}"
+    except Exception:
+        return f"resource #{resource_id} on project #{project_id}"
 
 
 def resource_allocation_totals(over_only=False):

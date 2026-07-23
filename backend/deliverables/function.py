@@ -14,6 +14,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 import auth
+import activity
 from deliverables_repository import (
     list_deliverables,
     get_deliverable,
@@ -159,6 +160,7 @@ def _handle_create(event):
     if not project_exists(data.get("project_id")):
         return _error(400, f"Referenced project {data.get('project_id')} does not exist.")
     deliverable = create_deliverable(data)
+    activity.record(activity.actor(event), "created", "deliverable", deliverable["id"], deliverable["name"])
     return _response(201, deliverable)
 
 
@@ -173,20 +175,36 @@ def _handle_update(deliverable_id, event):
     # If the project_id is being changed, the new parent project must exist.
     if data.get("project_id") is not None and not project_exists(data.get("project_id")):
         return _error(400, f"Referenced project {data.get('project_id')} does not exist.")
+    before = get_deliverable(did)
+    if before is None:
+        return _error(404, f"Deliverable {did} not found.")
     deliverable = update_deliverable(did, data)
     if deliverable is None:
         return _error(404, f"Deliverable {did} not found.")
+    changes = activity.diff(before, deliverable)
+    if changes:
+        activity.record(activity.actor(event), "updated", "deliverable", deliverable["id"], deliverable["name"], changes)
     return _response(200, deliverable)
 
 
-def _handle_delete(deliverable_id):
+def _handle_delete(deliverable_id, event):
     did = _parse_id(deliverable_id)
     if did is None:
         return _error(404, f"Deliverable '{deliverable_id}' not found.")
     deleted = delete_deliverable(did)
     if deleted is None:
         return _error(404, f"Deliverable {did} not found.")
+    activity.record(activity.actor(event), "deleted", "deliverable", deleted["id"], deleted["name"])
     return _no_content()
+
+
+def _deliverable_name(did):
+    """Best-effort deliverable name for readable dependency log entries. Never raises."""
+    try:
+        row = get_deliverable(did)
+        return row["name"] if row else f"#{did}"
+    except Exception:
+        return f"#{did}"
 
 
 # ---------------------------------------------------------------------------
@@ -229,10 +247,13 @@ def _handle_add_dependency(deliverable_id, event):
         edge = add_dependency(did, dep_on)
     except DuplicateDependencyError:
         return _error(400, f"Deliverable {did} already depends on {dep_on}.")
+    name = f"{_deliverable_name(did)} depends on {_deliverable_name(dep_on)}"
+    activity.record(activity.actor(event), "created", "dependency", did, name,
+                    [{"field": "depends_on_id", "old": None, "new": dep_on}])
     return _response(201, edge)
 
 
-def _handle_remove_dependency(deliverable_id, depends_on_id):
+def _handle_remove_dependency(deliverable_id, depends_on_id, event):
     did = _parse_id(deliverable_id)
     dep_on = _parse_id(depends_on_id)
     if did is None or dep_on is None:
@@ -240,6 +261,8 @@ def _handle_remove_dependency(deliverable_id, depends_on_id):
     removed = remove_dependency(did, dep_on)
     if removed is None:
         return _error(404, f"Deliverable {did} does not depend on {dep_on}.")
+    name = f"{_deliverable_name(did)} depends on {_deliverable_name(dep_on)}"
+    activity.record(activity.actor(event), "deleted", "dependency", did, name)
     return _no_content()
 
 
@@ -279,7 +302,7 @@ def handler(event=None, context=None):
             if method == "POST" and len(segments) == 2:
                 return _handle_add_dependency(deliverable_id, event)
             if method == "DELETE" and len(segments) == 3:
-                return _handle_remove_dependency(deliverable_id, segments[2])
+                return _handle_remove_dependency(deliverable_id, segments[2], event)
             return _error(405, f"Method {method} not allowed on this path.")
 
         # --- Deliverable CRUD routes ---
@@ -294,7 +317,7 @@ def handler(event=None, context=None):
         if method == "DELETE":
             if not deliverable_id:
                 return _error(400, "A deliverable id is required to delete.")
-            return _handle_delete(deliverable_id)
+            return _handle_delete(deliverable_id, event)
 
         return _error(405, f"Method {method} not allowed.")
     except auth.AuthError as err:

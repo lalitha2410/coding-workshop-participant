@@ -113,7 +113,7 @@ def update_deliverable(deliverable_id, data):
 
 def delete_deliverable(deliverable_id):
     """Delete a deliverable; return the deleted row ({"id": ...}) or None if not found."""
-    sql = "DELETE FROM deliverables WHERE id = %s RETURNING id"
+    sql = "DELETE FROM deliverables WHERE id = %s RETURNING id, name"
     return execute(sql, (deliverable_id,), fetch="one")
 
 

@@ -358,7 +358,7 @@ def test_change_role_viewer_403(repo, bypass_user_check):
 # ---- delete ----
 
 def test_delete_user_204(repo, bypass_user_check):
-    repo.set("delete_user", {"id": 5})
+    repo.set("delete_user", {"id": 5, "username": "sam"})
     resp = function.handler({"httpMethod": "DELETE", "path": "/auth/users/5", "headers": _hdr("Admin")})
     assert resp["statusCode"] == 204 and resp["body"] == ""
 
@@ -388,6 +388,7 @@ def test_users_wrong_method_405(repo, bypass_user_check):
 # ---- update details (username/email) ----
 
 def test_update_user_details_200(repo, bypass_user_check):
+    repo.set("get_user_by_id", A_USER)  # before-state fetch for the activity diff
     repo.set("update_user_details", {**A_USER, "username": "sam2", "email": "sam2@acme.test"})
     resp = function.handler({"httpMethod": "PUT", "path": "/auth/users/5", "headers": _hdr("Admin"),
                              "body": json.dumps({"username": "sam2", "email": "sam2@acme.test"})})
@@ -398,6 +399,7 @@ def test_update_user_details_200(repo, bypass_user_check):
 
 
 def test_update_user_duplicate_400(repo, bypass_user_check):
+    repo.set("get_user_by_id", A_USER)  # before-state fetch precedes the update
     repo.set("update_user_details", DuplicateUserError("sam2"))
     resp = function.handler({"httpMethod": "PUT", "path": "/auth/users/5", "headers": _hdr("Admin"),
                              "body": json.dumps({"username": "taken"})})

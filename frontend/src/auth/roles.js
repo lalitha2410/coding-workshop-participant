@@ -10,8 +10,8 @@ export const ROLES = ['Viewer', 'Contributor', 'Manager', 'Admin'];
 const PERMISSIONS = {
   Viewer: new Set(['read']),
   Contributor: new Set(['read', 'create', 'update']),
-  Manager: new Set(['read', 'create', 'update', 'delete']),
-  Admin: new Set(['read', 'create', 'update', 'delete', 'manage_users']),
+  Manager: new Set(['read', 'create', 'update', 'delete', 'view_activity']),
+  Admin: new Set(['read', 'create', 'update', 'delete', 'manage_users', 'view_activity']),
 };
 
 export function can(role, action) {

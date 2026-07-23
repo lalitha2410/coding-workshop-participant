@@ -1,26 +1,35 @@
 import { useCallback, useState } from 'react';
 import {
   Box, Card, Button, MenuItem, TextField, Table, TableHead, TableBody, TableRow, TableCell,
-  IconButton, Tooltip, LinearProgress,
+  IconButton, Tooltip, LinearProgress, Checkbox,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/AddRounded';
 import EditIcon from '@mui/icons-material/EditOutlined';
 import DeleteIcon from '@mui/icons-material/DeleteOutline';
+import LabelIcon from '@mui/icons-material/LabelOutlined';
 import { PageHeader } from '../../components/common/PageHeader';
 import { StatusChip, RiskChip } from '../../components/data/StatusChip';
 import { ResultStates, TableSkeleton, EmptyState } from '../../components/data/ResultStates';
 import { PaginationBar } from '../../components/data/PaginationBar';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
+import { BulkActionBar } from '../../components/data/BulkActionBar';
+import { BulkStatusDialog } from '../../components/data/BulkStatusDialog';
+import { BulkResultDialog } from '../../components/data/BulkResultDialog';
 import { ProjectFormDialog } from './ProjectFormDialog';
 import { usePaginatedList } from '../../hooks/usePaginatedList';
+import { useBulk } from '../../hooks/useBulk';
+import { useSelection } from '../../utils/selection';
+import { pluralize } from '../../utils/bulk';
 import { ExportButton } from '../../components/data/ExportButton';
 import { fetchAllRows } from '../../api/fetchAll';
-import { listProjects, deleteProject, PROJECT_STATUSES, DEPARTMENTS } from '../../api/projects';
+import { listProjects, deleteProject, updateProject, PROJECT_STATUSES, DEPARTMENTS } from '../../api/projects';
 import { fmtMoney, fmtDate, isAtRisk } from '../../utils/format';
 import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/roles';
 import { useToast } from '../../components/common/Toast';
 import { entityMsg } from '../../utils/messages';
+
+const STATUS_OPTIONS = PROJECT_STATUSES.map((s) => ({ value: s, label: s.replace(/_/g, ' ') }));
 
 const EXPORT_COLUMNS = [
   { header: 'ID', value: 'id' },
@@ -45,8 +54,27 @@ export default function ProjectsPage() {
   const canCreate = can(role, 'create');
   const canUpdate = can(role, 'update');
   const canDelete = can(role, 'delete');
+  const showSelection = canDelete || canUpdate;
+
+  // Bulk selection + actions. Selection clears on page/filter change (resetKey)
+  // and after every completed action (via onSettled).
+  const resetKey = `${list.offset}|${JSON.stringify(list.filters)}`;
+  const sel = useSelection(list.items, resetKey);
+  const bulk = useBulk({ onSettled: () => { sel.clear(); list.refetch(); } });
+  const [bulkDelete, setBulkDelete] = useState(false);
+  const [bulkStatus, setBulkStatus] = useState(false);
 
   const onSaved = useCallback(() => { setForm({ open: false, project: null }); list.refetch(); }, [list]);
+
+  async function runBulkDelete() {
+    setBulkDelete(false);
+    await bulk.run(sel.selectedItems, (p) => deleteProject(p.id), { singular: 'project', verbPast: 'deleted' });
+  }
+
+  async function runBulkStatus(status) {
+    setBulkStatus(false);
+    await bulk.run(sel.selectedItems, (p) => updateProject(p.id, { status }), { singular: 'project', verbPast: 'updated' });
+  }
 
   async function confirmDelete() {
     setDel((d) => ({ ...d, busy: true }));
@@ -92,6 +120,21 @@ export default function ProjectsPage() {
         </TextField>
       </Box>
 
+      {showSelection && sel.count > 0 && (
+        <BulkActionBar count={sel.count} running={bulk.running} progress={bulk.progress} onClear={sel.clear}>
+          {canUpdate && (
+            <Button size="small" startIcon={<LabelIcon sx={{ fontSize: 16 }} />} disabled={bulk.running} onClick={() => setBulkStatus(true)}>
+              Set status
+            </Button>
+          )}
+          {canDelete && (
+            <Button size="small" color="error" startIcon={<DeleteIcon sx={{ fontSize: 16 }} />} disabled={bulk.running} onClick={() => setBulkDelete(true)}>
+              Delete
+            </Button>
+          )}
+        </BulkActionBar>
+      )}
+
       <Card>
         <ResultStates
           loading={list.loading}
@@ -104,6 +147,11 @@ export default function ProjectsPage() {
           <Table>
             <TableHead>
               <TableRow>
+                {showSelection && (
+                  <TableCell padding="checkbox">
+                    <Checkbox size="small" checked={sel.allSelected} indeterminate={sel.someSelected} onChange={sel.toggleAll} inputProps={{ 'aria-label': 'Select all projects on this page' }} />
+                  </TableCell>
+                )}
                 <TableCell>Project</TableCell>
                 <TableCell>Department</TableCell>
                 <TableCell>Status</TableCell>
@@ -118,7 +166,12 @@ export default function ProjectsPage() {
                 const consumed = Number(p.budget_consumed) || 0;
                 const pct = planned > 0 ? Math.min(Math.round((consumed / planned) * 100), 999) : 0;
                 return (
-                  <TableRow key={p.id} hover>
+                  <TableRow key={p.id} hover selected={sel.isSelected(p.id)}>
+                    {showSelection && (
+                      <TableCell padding="checkbox">
+                        <Checkbox size="small" checked={sel.isSelected(p.id)} onChange={() => sel.toggle(p.id)} inputProps={{ 'aria-label': `Select ${p.name}` }} />
+                      </TableCell>
+                    )}
                     <TableCell sx={{ fontWeight: 600 }}>{p.name}</TableCell>
                     <TableCell sx={{ color: 'text.secondary' }}>{p.department || '—'}</TableCell>
                     <TableCell>
@@ -170,6 +223,25 @@ export default function ProjectsPage() {
         onConfirm={confirmDelete}
         onClose={() => setDel({ open: false, project: null, busy: false })}
       />
+
+      <ConfirmDialog
+        open={bulkDelete}
+        title="Delete projects?"
+        message={`Delete ${pluralize(sel.count, 'project')}? This can't be undone — their deliverables and allocations go too.`}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={runBulkDelete}
+        onClose={() => setBulkDelete(false)}
+      />
+      <BulkStatusDialog
+        open={bulkStatus}
+        count={sel.count}
+        singular="project"
+        statuses={STATUS_OPTIONS}
+        onConfirm={runBulkStatus}
+        onClose={() => setBulkStatus(false)}
+      />
+      <BulkResultDialog result={bulk.result} labelFor={(p) => p.name} onClose={bulk.clearResult} />
     </Box>
   );
 }

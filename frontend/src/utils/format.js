@@ -23,6 +23,57 @@ export function fmtDate(value) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+/**
+ * Parse a backend timestamp. PostgreSQL NOW() is serialized without a timezone
+ * suffix; the DB runs in UTC, so treat a naive ISO string as UTC (append 'Z')
+ * to avoid a local-offset skew in relative times.
+ */
+function parseTs(value) {
+  if (!value) return null;
+  let s = String(value);
+  if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) s = s.replace(' ', 'T') + 'Z';
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** Full, exact timestamp for tooltips, e.g. "Jul 23, 2026, 10:04 AM". */
+export function fmtDateTime(value) {
+  const d = parseTs(value);
+  if (!d) return '—';
+  return d.toLocaleString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+  });
+}
+
+/** Relative time like "2 hours ago" / "just now". `now` is injectable for tests. */
+export function fmtRelative(value, now = Date.now()) {
+  const d = parseTs(value);
+  if (!d) return '—';
+  const secs = Math.round((now - d.getTime()) / 1000);
+  const future = secs < 0;
+  const s = Math.abs(secs);
+  const phrase = relativePhrase(s);
+  if (phrase === 'just now') return phrase;
+  return future ? `in ${phrase}` : `${phrase} ago`;
+}
+
+function relativePhrase(s) {
+  const mins = Math.round(s / 60);
+  const hours = Math.round(s / 3600);
+  const days = Math.round(s / 86400);
+  if (s < 45) return 'just now';
+  if (s < 90) return 'a minute';
+  if (mins < 45) return `${mins} minutes`;
+  if (mins < 90) return 'an hour';
+  if (hours < 24) return `${hours} hours`;
+  if (hours < 36) return 'a day';
+  if (days < 30) return `${days} days`;
+  if (days < 45) return 'a month';
+  if (days < 365) return `${Math.round(days / 30)} months`;
+  const years = Math.round(days / 365);
+  return years <= 1 ? 'a year' : `${years} years`;
+}
+
 export function fmtPct(n, digits = 0) {
   const v = Number(n);
   return Number.isFinite(v) ? `${v.toFixed(digits)}%` : '—';

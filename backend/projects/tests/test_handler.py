@@ -149,6 +149,7 @@ def test_create_accepts_dict_body(repo):
 # ---------------------------------------------------------------------------
 
 def test_update_valid_returns_200(repo):
+    repo.set("get_project", SAMPLE_PROJECT)  # before-state fetch for the activity diff
     repo.set("update_project", SAMPLE_PROJECT)
     event = {"httpMethod": "PUT", "path": "/projects/1", "body": json.dumps({"status": "completed"})}
     resp = function.handler(event)
@@ -180,7 +181,7 @@ def test_update_invalid_payload_returns_400(repo):
 # ---------------------------------------------------------------------------
 
 def test_delete_found_returns_204_with_empty_body(repo):
-    repo.set("delete_project", {"id": 1})
+    repo.set("delete_project", {"id": 1, "name": "Apollo"})
     resp = function.handler({"httpMethod": "DELETE", "path": "/projects/1"})
     assert resp["statusCode"] == 204
     assert resp["body"] == ""
@@ -276,7 +277,7 @@ def test_contributor_cannot_delete_returns_403(repo):
 
 
 def test_manager_can_delete_returns_204(repo):
-    repo.set("delete_project", {"id": 1})
+    repo.set("delete_project", {"id": 1, "name": "Apollo"})
     resp = function.handler({"httpMethod": "DELETE", "path": "/projects/1", "headers": _hdr("Manager")})
     assert resp["statusCode"] == 204
 

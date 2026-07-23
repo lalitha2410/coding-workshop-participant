@@ -116,5 +116,5 @@ def update_project(project_id, data):
 
 def delete_project(project_id):
     """Delete a project; return the deleted row ({"id": ...}) or None if not found."""
-    sql = "DELETE FROM projects WHERE id = %s RETURNING id"
+    sql = "DELETE FROM projects WHERE id = %s RETURNING id, name"
     return execute(sql, (project_id,), fetch="one")

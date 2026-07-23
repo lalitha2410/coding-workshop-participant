@@ -14,6 +14,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 import auth
+import activity
 from resources_repository import (
     list_resources,
     get_resource,
@@ -143,6 +144,7 @@ def _handle_create(event):
         resource = create_resource(data)
     except DuplicateEmailError as dup:
         return _error(400, f"A resource with email '{dup}' already exists.")
+    activity.record(activity.actor(event), "created", "resource", resource["id"], resource["name"])
     return _response(201, resource)
 
 
@@ -154,22 +156,29 @@ def _handle_update(resource_id, event):
     errors = validate_update(data)
     if errors:
         return _error(400, "Validation failed.", errors)
+    before = get_resource(rid)
+    if before is None:
+        return _error(404, f"Resource {rid} not found.")
     try:
         resource = update_resource(rid, data)
     except DuplicateEmailError as dup:
         return _error(400, f"A resource with email '{dup}' already exists.")
     if resource is None:
         return _error(404, f"Resource {rid} not found.")
+    changes = activity.diff(before, resource)
+    if changes:
+        activity.record(activity.actor(event), "updated", "resource", resource["id"], resource["name"], changes)
     return _response(200, resource)
 
 
-def _handle_delete(resource_id):
+def _handle_delete(resource_id, event):
     rid = _parse_id(resource_id)
     if rid is None:
         return _error(404, f"Resource '{resource_id}' not found.")
     deleted = delete_resource(rid)
     if deleted is None:
         return _error(404, f"Resource {rid} not found.")
+    activity.record(activity.actor(event), "deleted", "resource", deleted["id"], deleted["name"])
     return _no_content()
 
 
@@ -199,7 +208,7 @@ def handler(event=None, context=None):
         if method == "DELETE":
             if not resource_id:
                 return _error(400, "A resource id is required to delete.")
-            return _handle_delete(resource_id)
+            return _handle_delete(resource_id, event)
 
         return _error(405, f"Method {method} not allowed.")
     except auth.AuthError as err:

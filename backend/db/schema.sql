@@ -78,3 +78,27 @@ CREATE INDEX IF NOT EXISTS idx_allocations_project  ON allocations(project_id);
 
 INSERT INTO roles (name) VALUES ('Admin'),('Manager'),('Contributor'),('Viewer')
 ON CONFLICT (name) DO NOTHING;
+
+-- ============================================================
+-- Activity log / audit trail
+-- ============================================================
+-- user_id keeps a FK to users but survives deletion (SET NULL); username and
+-- entity_name are denormalized so history stays readable after the referenced
+-- rows are gone. `changes` holds field-level [{field, old, new}] for updates.
+
+CREATE TABLE IF NOT EXISTS activity_log (
+    id          SERIAL PRIMARY KEY,
+    user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    username    VARCHAR(100),
+    action      VARCHAR(20)  NOT NULL CHECK (action IN ('created','updated','deleted')),
+    entity_type VARCHAR(30)  NOT NULL
+                CHECK (entity_type IN ('project','deliverable','resource','allocation','dependency','user')),
+    entity_id   INTEGER,
+    entity_name VARCHAR(255),
+    changes     JSONB,
+    created_at  TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_entity  ON activity_log(entity_type);
+CREATE INDEX IF NOT EXISTS idx_activity_user    ON activity_log(user_id);

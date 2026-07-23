@@ -147,6 +147,7 @@ def test_create_malformed_json_returns_400():
 # ---------------------------------------------------------------------------
 
 def test_update_valid_returns_200(repo):
+    repo.set("get_deliverable", SAMPLE_DELIVERABLE)  # before-state fetch for the activity diff
     repo.set("update_deliverable", SAMPLE_DELIVERABLE)
     event = {"httpMethod": "PUT", "path": "/deliverables/1",
              "body": json.dumps({"status": "completed"})}
@@ -191,7 +192,7 @@ def test_update_invalid_payload_returns_400(repo):
 # ---------------------------------------------------------------------------
 
 def test_delete_found_returns_204_with_empty_body(repo):
-    repo.set("delete_deliverable", {"id": 1})
+    repo.set("delete_deliverable", {"id": 1, "name": "Beta"})
     resp = function.handler({"httpMethod": "DELETE", "path": "/deliverables/1"})
     assert resp["statusCode"] == 204
     assert resp["body"] == ""
@@ -288,7 +289,7 @@ def test_contributor_cannot_delete_returns_403(repo):
 
 
 def test_manager_can_delete_returns_204(repo):
-    repo.set("delete_deliverable", {"id": 1})
+    repo.set("delete_deliverable", {"id": 1, "name": "Beta"})
     resp = function.handler({"httpMethod": "DELETE", "path": "/deliverables/1", "headers": _hdr("Manager")})
     assert resp["statusCode"] == 204
 

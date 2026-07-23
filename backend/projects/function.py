@@ -14,6 +14,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 import auth
+import activity
 from projects_repository import (
     list_projects,
     get_project,
@@ -144,6 +145,7 @@ def _handle_create(event):
     if errors:
         return _error(400, "Validation failed.", errors)
     project = create_project(data)
+    activity.record(activity.actor(event), "created", "project", project["id"], project["name"])
     return _response(201, project)
 
 
@@ -155,19 +157,26 @@ def _handle_update(project_id, event):
     errors = validate_update(data)
     if errors:
         return _error(400, "Validation failed.", errors)
+    before = get_project(pid)
+    if before is None:
+        return _error(404, f"Project {pid} not found.")
     project = update_project(pid, data)
     if project is None:
         return _error(404, f"Project {pid} not found.")
+    changes = activity.diff(before, project)
+    if changes:
+        activity.record(activity.actor(event), "updated", "project", project["id"], project["name"], changes)
     return _response(200, project)
 
 
-def _handle_delete(project_id):
+def _handle_delete(project_id, event):
     pid = _parse_id(project_id)
     if pid is None:
         return _error(404, f"Project '{project_id}' not found.")
     deleted = delete_project(pid)
     if deleted is None:
         return _error(404, f"Project {pid} not found.")
+    activity.record(activity.actor(event), "deleted", "project", deleted["id"], deleted["name"])
     return _no_content()
 
 
@@ -197,7 +206,7 @@ def handler(event=None, context=None):
         if method == "DELETE":
             if not project_id:
                 return _error(400, "A project id is required to delete.")
-            return _handle_delete(project_id)
+            return _handle_delete(project_id, event)
 
         return _error(405, f"Method {method} not allowed.")
     except auth.AuthError as err:

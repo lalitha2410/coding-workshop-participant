@@ -22,6 +22,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 import auth
+import activity
 from users_repository import (
     get_user_by_id,
     get_user_for_login,
@@ -33,6 +34,7 @@ from users_repository import (
     delete_user,
     DuplicateUserError,
 )
+from activity_repository import list_activity
 from validation import validate_register, validate_login, validate_user_update
 from pagination import parse_pagination, PaginationError
 
@@ -153,6 +155,7 @@ def _handle_register(event):
         user = create_user(data["username"], data["email"], password_hash, role["id"])
     except DuplicateUserError:
         return _error(400, "Username or email is already in use.")
+    activity.record(activity.actor(event), "created", "user", user["id"], user["username"])
     return _response(201, user)
 
 
@@ -232,9 +235,13 @@ def _handle_change_role(event, user_id):
     role = get_role_by_name(role_name)
     if role is None:
         return _error(400, f"Unknown role '{role_name}'.")
+    before = get_user_by_id(uid)
     updated = update_user_role(uid, role["id"])
     if updated is None:
         return _error(404, f"User {uid} not found.")
+    if before and before.get("role") != updated.get("role"):
+        activity.record(activity.actor(event), "updated", "user", updated["id"], updated["username"],
+                        [{"field": "role", "old": before.get("role"), "new": updated.get("role")}])
     return _response(200, updated)
 
 
@@ -249,12 +256,18 @@ def _handle_update_user(event, user_id):
     errors = validate_user_update(data)
     if errors:
         return _error(400, "Validation failed.", errors)
+    before = get_user_by_id(uid)
+    if before is None:
+        return _error(404, f"User {uid} not found.")
     try:
         updated = update_user_details(uid, username=data.get("username"), email=data.get("email"))
     except DuplicateUserError:
         return _error(400, "Username or email is already in use.")
     if updated is None:
         return _error(404, f"User {uid} not found.")
+    changes = activity.diff(before, updated)
+    if changes:
+        activity.record(activity.actor(event), "updated", "user", updated["id"], updated["username"], changes)
     return _response(200, updated)
 
 
@@ -271,7 +284,43 @@ def _handle_delete_user(event, user_id):
     deleted = delete_user(uid)
     if deleted is None:
         return _error(404, f"User {uid} not found.")
+    activity.record(activity.actor(event), "deleted", "user", deleted["id"], deleted["username"])
     return _no_content()
+
+
+# ---------------------------------------------------------------------------
+# Activity log / audit trail  (/auth/activity)
+# ---------------------------------------------------------------------------
+
+def _handle_list_activity(event):
+    """
+    GET /auth/activity — paginated, newest-first, filterable audit trail.
+
+    RBAC (enforced here, in the backend): Manager+ only (Viewer/Contributor get
+    403 via the view_activity permission). Managers see everything EXCEPT
+    entity_type='user' entries; only Admins see user-management history.
+    """
+    principal = auth.authenticate(event, user_exists=auth.db_user_exists)
+    auth.require_permission(principal, auth.VIEW_ACTIVITY)
+
+    query = event.get("queryStringParameters") or {}
+    try:
+        limit, offset = parse_pagination(query)
+    except PaginationError as exc:
+        return _error(400, str(exc))
+
+    # User-entity history is Admin-only. Enforced in the SQL, not just the UI.
+    is_admin = auth.role_can(principal.get("role"), auth.MANAGE_USERS)
+
+    user_id = _parse_id(query.get("user")) if query.get("user") else None
+    return _response(200, list_activity(
+        entity_type=query.get("entity_type"),
+        action=query.get("action"),
+        user_id=user_id,
+        include_user_entities=is_admin,
+        limit=limit,
+        offset=offset,
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +349,10 @@ def handler(event=None, context=None):
             if method != "GET":
                 return _error(405, f"Method {method} not allowed on /auth/me.")
             return _handle_me(event)
+        if action == "activity" and len(segments) == 1:
+            if method != "GET":
+                return _error(405, f"Method {method} not allowed on /auth/activity.")
+            return _handle_list_activity(event)
 
         # --- Admin user management ---
         if action == "users":

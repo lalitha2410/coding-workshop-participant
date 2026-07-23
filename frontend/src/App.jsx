@@ -14,6 +14,7 @@ import ProjectsPage from './pages/projects/ProjectsPage';
 import DeliverablesPage from './pages/deliverables/DeliverablesPage';
 import ResourcesPage from './pages/resources/ResourcesPage';
 import AllocationsPage from './pages/allocations/AllocationsPage';
+import ActivityPage from './pages/activity/ActivityPage';
 import UsersPage from './pages/UsersPage';
 import { NotPermittedPage, NotFoundPage } from './pages/StatusPages';
 
@@ -29,6 +30,14 @@ export default function App() {
         <Route path="deliverables" element={<DeliverablesPage />} />
         <Route path="resources" element={<ResourcesPage />} />
         <Route path="allocations" element={<AllocationsPage />} />
+        <Route
+          path="activity"
+          element={
+            <ProtectedRoute permission="view_activity">
+              <ActivityPage />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="users"
           element={

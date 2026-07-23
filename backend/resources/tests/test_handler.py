@@ -145,6 +145,7 @@ def test_create_malformed_json_returns_400():
 # ---------------------------------------------------------------------------
 
 def test_update_valid_returns_200(repo):
+    repo.set("get_resource", SAMPLE_RESOURCE)  # before-state fetch for the activity diff
     repo.set("update_resource", SAMPLE_RESOURCE)
     event = {"httpMethod": "PUT", "path": "/resources/1",
              "body": json.dumps({"title": "Staff Engineer"})}
@@ -162,6 +163,7 @@ def test_update_not_found_returns_404(repo):
 
 
 def test_update_duplicate_email_returns_400(repo):
+    repo.set("get_resource", SAMPLE_RESOURCE)  # before-state fetch precedes the update
     repo.set("update_resource", DuplicateEmailError("taken@example.com"))
     event = {"httpMethod": "PUT", "path": "/resources/1",
              "body": json.dumps({"email": "taken@example.com"})}
@@ -188,7 +190,7 @@ def test_update_invalid_payload_returns_400(repo):
 # ---------------------------------------------------------------------------
 
 def test_delete_found_returns_204_with_empty_body(repo):
-    repo.set("delete_resource", {"id": 1})
+    repo.set("delete_resource", {"id": 1, "name": "Marcus Reed"})
     resp = function.handler({"httpMethod": "DELETE", "path": "/resources/1"})
     assert resp["statusCode"] == 204
     assert resp["body"] == ""
@@ -285,7 +287,7 @@ def test_contributor_cannot_delete_returns_403(repo):
 
 
 def test_manager_can_delete_returns_204(repo):
-    repo.set("delete_resource", {"id": 1})
+    repo.set("delete_resource", {"id": 1, "name": "Marcus Reed"})
     resp = function.handler({"httpMethod": "DELETE", "path": "/resources/1", "headers": _hdr("Manager")})
     assert resp["statusCode"] == 204
 

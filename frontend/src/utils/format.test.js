@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fmtMoney, fmtDate, fmtPct, daysUntil, isAtRisk } from './format';
+import { fmtMoney, fmtDate, fmtPct, daysUntil, isAtRisk, fmtRelative, fmtDateTime } from './format';
 
 // Deadline N days from now, as a YYYY-MM-DD string (matches API date shape).
 const isoInDays = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
@@ -61,5 +61,41 @@ describe('isAtRisk', () => {
   });
   it('is safe on empty input', () => {
     expect(isAtRisk(null)).toBe(false);
+  });
+});
+
+describe('fmtRelative', () => {
+  // A fixed "now" so relative output is deterministic. The backend sends naive
+  // UTC timestamps (no zone); fmtRelative treats them as UTC.
+  const NOW = Date.parse('2026-07-22T12:00:00Z');
+  const agoUtc = (secs) => new Date(NOW - secs * 1000).toISOString().replace('Z', '');
+
+  it('says "just now" for very recent events', () => {
+    expect(fmtRelative(agoUtc(5), NOW)).toBe('just now');
+  });
+  it('renders minutes and hours', () => {
+    expect(fmtRelative(agoUtc(5 * 60), NOW)).toBe('5 minutes ago');
+    expect(fmtRelative(agoUtc(2 * 3600), NOW)).toBe('2 hours ago');
+  });
+  it('renders days', () => {
+    expect(fmtRelative(agoUtc(3 * 86400), NOW)).toBe('3 days ago');
+  });
+  it('treats a naive timestamp as UTC (no local-offset skew)', () => {
+    // Exactly "now" in UTC -> just now, regardless of the test machine's zone.
+    expect(fmtRelative('2026-07-22T12:00:00', NOW)).toBe('just now');
+  });
+  it('handles future timestamps and bad input', () => {
+    expect(fmtRelative(new Date(NOW + 3600 * 1000).toISOString(), NOW)).toBe('in an hour');
+    expect(fmtRelative(null, NOW)).toBe('—');
+    expect(fmtRelative('not-a-date', NOW)).toBe('—');
+  });
+});
+
+describe('fmtDateTime', () => {
+  it('formats a full timestamp', () => {
+    expect(fmtDateTime('2026-07-22T12:00:00Z')).toMatch(/2026/);
+  });
+  it('is safe on empty input', () => {
+    expect(fmtDateTime(null)).toBe('—');
   });
 });

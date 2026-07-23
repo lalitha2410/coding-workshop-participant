@@ -18,6 +18,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 import auth
+import activity
 from allocations_repository import (
     list_allocations,
     get_allocation,
@@ -27,6 +28,7 @@ from allocations_repository import (
     resource_exists,
     project_exists,
     resource_allocation_totals,
+    allocation_label,
     DuplicateAllocationError,
 )
 from validation import validate_create, validate_update
@@ -184,6 +186,8 @@ def _handle_create(event):
             400,
             f"Resource {dup.resource_id} is already allocated to project {dup.project_id}.",
         )
+    label = allocation_label(allocation["resource_id"], allocation["project_id"])
+    activity.record(activity.actor(event), "created", "allocation", allocation["id"], label)
     return _response(201, allocation)
 
 
@@ -198,6 +202,9 @@ def _handle_update(allocation_id, event):
     missing = _missing_references(data)
     if missing:
         return _error(400, f"Referenced {' and '.join(missing)} does not exist.")
+    before = get_allocation(aid)
+    if before is None:
+        return _error(404, f"Allocation {aid} not found.")
     try:
         allocation = update_allocation(aid, data)
     except DuplicateAllocationError as dup:
@@ -207,16 +214,22 @@ def _handle_update(allocation_id, event):
         )
     if allocation is None:
         return _error(404, f"Allocation {aid} not found.")
+    changes = activity.diff(before, allocation)
+    if changes:
+        label = allocation_label(allocation["resource_id"], allocation["project_id"])
+        activity.record(activity.actor(event), "updated", "allocation", allocation["id"], label, changes)
     return _response(200, allocation)
 
 
-def _handle_delete(allocation_id):
+def _handle_delete(allocation_id, event):
     aid = _parse_id(allocation_id)
     if aid is None:
         return _error(404, f"Allocation '{allocation_id}' not found.")
     deleted = delete_allocation(aid)
     if deleted is None:
         return _error(404, f"Allocation {aid} not found.")
+    label = allocation_label(deleted["resource_id"], deleted["project_id"])
+    activity.record(activity.actor(event), "deleted", "allocation", deleted["id"], label)
     return _no_content()
 
 
@@ -252,7 +265,7 @@ def handler(event=None, context=None):
         if method == "DELETE":
             if not allocation_id or allocation_id in _SUMMARY_ACTIONS:
                 return _error(400, "An allocation id is required to delete.")
-            return _handle_delete(allocation_id)
+            return _handle_delete(allocation_id, event)
 
         return _error(405, f"Method {method} not allowed.")
     except auth.AuthError as err:

@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import {
   Box, Card, Button, TextField, InputAdornment, Table, TableHead, TableBody, TableRow, TableCell,
-  IconButton, Tooltip, Avatar, Typography,
+  IconButton, Tooltip, Avatar, Typography, Checkbox,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/AddRounded';
 import SearchIcon from '@mui/icons-material/SearchRounded';
@@ -11,8 +11,13 @@ import { PageHeader } from '../../components/common/PageHeader';
 import { ResultStates, TableSkeleton, EmptyState } from '../../components/data/ResultStates';
 import { PaginationBar } from '../../components/data/PaginationBar';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
+import { BulkActionBar } from '../../components/data/BulkActionBar';
+import { BulkResultDialog } from '../../components/data/BulkResultDialog';
 import { ResourceFormDialog } from './ResourceFormDialog';
 import { usePaginatedList } from '../../hooks/usePaginatedList';
+import { useBulk } from '../../hooks/useBulk';
+import { useSelection } from '../../utils/selection';
+import { pluralize } from '../../utils/bulk';
 import { ExportButton } from '../../components/data/ExportButton';
 import { fetchAllRows } from '../../api/fetchAll';
 import { listResources, deleteResource } from '../../api/resources';
@@ -45,8 +50,19 @@ export default function ResourcesPage() {
   const canCreate = can(role, 'create');
   const canUpdate = can(role, 'update');
   const canDelete = can(role, 'delete');
+  const showSelection = canDelete; // only bulk action here is delete (Manager+)
+
+  const resetKey = `${list.offset}|${JSON.stringify(list.filters)}`;
+  const sel = useSelection(list.items, resetKey);
+  const bulk = useBulk({ onSettled: () => { sel.clear(); list.refetch(); } });
+  const [bulkDelete, setBulkDelete] = useState(false);
 
   const onSaved = useCallback(() => { setForm({ open: false, resource: null }); list.refetch(); }, [list]);
+
+  async function runBulkDelete() {
+    setBulkDelete(false);
+    await bulk.run(sel.selectedItems, (r) => deleteResource(r.id), { singular: 'resource', verbPast: 'deleted' });
+  }
 
   async function confirmDelete() {
     setDel((d) => ({ ...d, busy: true }));
@@ -87,6 +103,14 @@ export default function ResourcesPage() {
         />
       </Box>
 
+      {showSelection && sel.count > 0 && (
+        <BulkActionBar count={sel.count} running={bulk.running} progress={bulk.progress} onClear={sel.clear}>
+          <Button size="small" color="error" startIcon={<DeleteIcon sx={{ fontSize: 16 }} />} disabled={bulk.running} onClick={() => setBulkDelete(true)}>
+            Delete
+          </Button>
+        </BulkActionBar>
+      )}
+
       <Card>
         <ResultStates
           loading={list.loading}
@@ -99,6 +123,11 @@ export default function ResourcesPage() {
           <Table>
             <TableHead>
               <TableRow>
+                {showSelection && (
+                  <TableCell padding="checkbox">
+                    <Checkbox size="small" checked={sel.allSelected} indeterminate={sel.someSelected} onChange={sel.toggleAll} inputProps={{ 'aria-label': 'Select all resources on this page' }} />
+                  </TableCell>
+                )}
                 <TableCell>Name</TableCell>
                 <TableCell>Title</TableCell>
                 <TableCell>Email</TableCell>
@@ -108,7 +137,12 @@ export default function ResourcesPage() {
             </TableHead>
             <TableBody>
               {list.items.map((r) => (
-                <TableRow key={r.id} hover>
+                <TableRow key={r.id} hover selected={sel.isSelected(r.id)}>
+                  {showSelection && (
+                    <TableCell padding="checkbox">
+                      <Checkbox size="small" checked={sel.isSelected(r.id)} onChange={() => sel.toggle(r.id)} inputProps={{ 'aria-label': `Select ${r.name}` }} />
+                    </TableCell>
+                  )}
                   <TableCell>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
                       <Avatar sx={{ width: 30, height: 30, fontSize: '0.7rem', fontWeight: 700, bgcolor: 'action.selected', color: 'primary.main' }}>{initials(r.name)}</Avatar>
@@ -141,6 +175,17 @@ export default function ResourcesPage() {
         confirmLabel="Delete" destructive busy={del.busy}
         onConfirm={confirmDelete} onClose={() => setDel({ open: false, resource: null, busy: false })}
       />
+
+      <ConfirmDialog
+        open={bulkDelete}
+        title="Delete resources?"
+        message={`Delete ${pluralize(sel.count, 'resource')}? This can't be undone — their allocations go too.`}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={runBulkDelete}
+        onClose={() => setBulkDelete(false)}
+      />
+      <BulkResultDialog result={bulk.result} labelFor={(r) => r.name} onClose={bulk.clearResult} />
     </Box>
   );
 }

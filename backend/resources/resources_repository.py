@@ -100,5 +100,5 @@ def update_resource(resource_id, data):
 
 def delete_resource(resource_id):
     """Delete a resource; return the deleted row ({"id": ...}) or None if not found."""
-    sql = "DELETE FROM resources WHERE id = %s RETURNING id"
+    sql = "DELETE FROM resources WHERE id = %s RETURNING id, name"
     return execute(sql, (resource_id,), fetch="one")

@@ -9,6 +9,7 @@ import DeliverablesIcon from '@mui/icons-material/ChecklistOutlined';
 import ResourcesIcon from '@mui/icons-material/GroupsOutlined';
 import AllocationsIcon from '@mui/icons-material/DonutSmallOutlined';
 import UsersIcon from '@mui/icons-material/ManageAccountsOutlined';
+import ActivityIcon from '@mui/icons-material/HistoryOutlined';
 
 export const NAV = [
   {
@@ -28,6 +29,10 @@ export const NAV = [
       { to: '/resources', label: 'Resources', icon: ResourcesIcon },
       { to: '/allocations', label: 'Allocations', icon: AllocationsIcon },
     ],
+  },
+  {
+    heading: 'Insights',
+    items: [{ to: '/activity', label: 'Activity', icon: ActivityIcon, permission: 'view_activity' }],
   },
   {
     heading: 'Admin',
